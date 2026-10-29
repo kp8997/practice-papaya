@@ -1,3 +1,5 @@
+Mình đảm bảo tất cả các câu trả lời sau đây đều đến từ ký ức, trải nghiệm lẫn kinh nghiệm của bản thân từ quá khứ cho đến hiện tại, không có % nào sử dụng AI hoặc google search.
+
 ## Q1 — Ký ức đầu tiên của bạn là gì?
 Mình nhớ được rất nhiều ký ức hồi nhỏ, chỉ có điều không nhớ được chính xác thứ tự, hay nói cách khác là không nhớ cái nào xảy ra đầu tiên. Vì vậy mình sẽ kể cái mà mình cho là xảy ra đầu tiên: đó là vào giờ ăn cơm tối, đang ở trên phòng khách xem tv, má sau khi đút cơm xong cho mình và xuống bếp lấy cơm thêm, mình chạy theo xuống dưới và vấp té, cằm đập xuống đất và chảy máu, vì vậy phải đưa vô bệnh viện khâu mấy mũi. Lúc đó trời tối, nhà chỉ có 2 người và phải nhờ ông anh bên hàng xóm chở đi cấp cứu bằng xe máy. Những gì mình nhớ trên quãng đường đó là bầu trời tối đen vì mình được bế nằm ngang ở giữa trên xe máy. Khi tới bệnh viện rồi những gì mình nhớ về bệnh viện là xung quanh toàn màu trắng và cảm giác đau khi khâu, khâu trực tiếp không có thuốc tê. Sở dĩ ký ức ở đây toàn màu trắng là vì phần lớn thời gian mình được bế hoặc đẩy trên cán, tới khi khâu, góc nhìn là hướng lên trần nhà.
 Trong các chi tiết ở trên chi tiết được nghe kể lại là: vết thương bị rách phải đi khâu, vì chính xác mình không thấy được nó rách như nào và không hiểu định nghĩa khâu là gì và tại sao khâu, hơn hết cảm giác lúc đó đau là chính. Cũng vì nó có cảm giác đau, và mình là người rất hay nhớ bằng hình ảnh diễn ra trong sự kiện nên mình nhớ được những gì xảy ra hôm đó. Việc mình có thể nhớ còn 1 phần vì có vết sẹo, và có những sự kiện khác xảy ra quanh nó trong khoảng thời gian mình lớn lên nên mình nhớ rõ, ví dụ như việc thường xuyên cạo râu và thấy trong gương, hồi cấp 2 phần da bị khâu hồi đó càng ngày càng to ra và thành 1 phần thịt nhỏ dưới cầm, bạn bè hay nhắc có hạt cơm dính dưới cầm nhưng thật ra đó là phần thịt sẹo. Phần thịt sẹo sau đó đã được bắn laser để nhỏ lại, nhưng bây giờ vẫn còn sẹo nhỏ có thể thấy được
@@ -21,7 +23,7 @@ Mình đã từng đi xe buýt hơn ngàn lần nên mình có thể hiểu rõ 
 
 ## Q9 — Thiết kế cánh cửa ra vào tốt nhất cho nhà vệ sinh Nam công cộng (mall / văn phòng / nhiều người dùng chung)
 Ưu nhược điểm của các loại cửa
-Hành lang chữ Z: 
+Hành lang chữ Z:
 	Ưu: Vệ sinh tránh tiếp xúc trực tiếp, bảo đảm riêng tư vì ngăn tầm nhìn, nhiều người có thể ra vào nhanh vì không có cửa, dễ sử dụng ít có tác dụng ngoài mong muốn như kẹt cửa, khóa trái cửa trong trường hợp hỏa hoạn, thiên tai.
 	Nhược: Tốn diện tích, tốn chi phí xây, có thể tốn công lau dọn tường hành lang, có thể có mùi, nhà về sinh có kết nối thông gió với bên ngoài tự nhiên hoặc có máy lọc khí để giảm bớt mùi nên tốn thèm chi phí,
 Cửa cảm biến:
