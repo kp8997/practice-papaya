@@ -1,0 +1,208 @@
+name: Insurance Claims Lifecycle Workflow
+version: "1.0.0"
+initialState: SUBMITTED
+
+defaults:
+  requiredDocuments:
+    - claim_form
+    - medical_report
+    - itemized_receipt
+
+roles:
+  - document_clerk
+  - team_lead
+  - assessor
+  - finance
+  - system
+
+states:
+  SUBMITTED:
+    description: Claim received, awaiting document verification
+  DOCUMENTS_VERIFIED:
+    description: All required documents confirmed present and valid
+  UNDER_ASSESSMENT:
+    description: Assessor is reviewing the claim
+  PENDING_INFO:
+    description: Additional information requested from member
+  APPROVED:
+    description: Claim approved for payment
+  REJECTED:
+    description: Claim denied
+  PAYMENT_INITIATED:
+    description: Payment processing started
+  CLOSED:
+    description: Claim lifecycle complete
+    terminal: true
+
+transitions:
+  - from: SUBMITTED
+    to: DOCUMENTS_VERIFIED
+    roles:
+      - document_clerk
+    preconditions:
+      - description: All required documents present
+        check:
+          all_of:
+            - op: not_empty
+              path: effective.requiredDocuments
+            - op: includes_all
+              path: effective.submittedDocuments
+              requiredPath: effective.requiredDocuments
+    sideEffects:
+      - type: notify
+        target: assessor_team
+        message: "Claim {{claim.id}} documents verified; ready for assessor assignment"
+
+  - from: DOCUMENTS_VERIFIED
+    to: UNDER_ASSESSMENT
+    roles:
+      - team_lead
+    preconditions:
+      - description: Assessor assigned
+        check:
+          op: not_empty
+          path: effective.assessorId
+    sideEffects:
+      - type: record_timestamp
+        field: assessmentStartedAt
+        message: "Logged assessment start time for claim {{claim.id}} (assessor: {{effective.assessorId}})"
+
+  - from: UNDER_ASSESSMENT
+    to: APPROVED
+    roles:
+      - assessor
+    preconditions:
+      - description: Assessment report complete
+        check:
+          op: equals
+          path: effective.assessmentReportComplete
+          value: true
+      - description: Amount must not exceed policy limit
+        check:
+          all_of:
+            - op: gt
+              path: effective.amount
+              value: 0
+            - op: lte_path
+              path: effective.amount
+              otherPath: effective.policyLimit
+    sideEffects:
+      - type: notify
+        target: member
+        message: "Claim {{claim.id}} approved for payment of {{effective.amount}}"
+      - type: create_payment_request
+        field: paymentRequestId
+        message: "Created payment request for claim {{claim.id}}"
+
+  - from: UNDER_ASSESSMENT
+    to: REJECTED
+    roles:
+      - assessor
+    preconditions:
+      - description: Assessment report complete
+        check:
+          op: equals
+          path: effective.assessmentReportComplete
+          value: true
+      - description: Rejection reason provided
+        check:
+          op: not_empty
+          path: effective.rejectionReason
+    sideEffects:
+      - type: notify
+        target: member
+        message: "Claim {{claim.id}} rejected ({{effective.rejectionReason}}). Appeal instructions: submit appeal within 30 days."
+
+  - from: UNDER_ASSESSMENT
+    to: PENDING_INFO
+    roles:
+      - assessor
+    preconditions:
+      - description: Missing info description provided
+        check:
+          op: not_empty
+          path: input.missingInfoDescription
+    sideEffects:
+      - type: notify
+        target: member
+        message: "Additional information requested for claim {{claim.id}}: {{input.missingInfoDescription}}"
+
+  - from: PENDING_INFO
+    to: DOCUMENTS_VERIFIED
+    roles:
+      - document_clerk
+    preconditions:
+      - description: New documents/info received
+        check:
+          any_of:
+            - op: not_empty
+              path: input.newDocuments
+            - op: not_empty
+              path: input.additionalInfo
+    sideEffects:
+      - type: reset_timer
+        timer: assessment
+        clearField: assessmentStartedAt
+        message: "Reset assessment timer for claim {{claim.id}} after receiving new information"
+
+  - from: APPROVED
+    to: PAYMENT_INITIATED
+    roles:
+      - finance
+    preconditions:
+      - description: Payment request created
+        check:
+          op: not_empty
+          path: claim.paymentRequestId
+    sideEffects:
+      - type: trigger_payment
+        field: paymentTransactionId
+        message: "Triggered payment system for claim {{claim.id}} (payment request: {{claim.paymentRequestId}})"
+
+  - from: PAYMENT_INITIATED
+    to: CLOSED
+    roles:
+      - finance
+    preconditions:
+      - description: Payment confirmed
+        check:
+          all_of:
+            - op: equals
+              path: effective.paymentConfirmed
+              value: true
+            - op: not_empty
+              path: effective.paymentReference
+    sideEffects:
+      - type: notify
+        target: member
+        message: "Payment confirmed for claim {{claim.id}} (payment reference: {{effective.paymentReference}})"
+
+  - from: REJECTED
+    to: CLOSED
+    roles:
+      - system
+    preconditions:
+      - description: Appeal period expired OR member acknowledged
+        check:
+          any_of:
+            - op: days_in_state_gte
+              days: 30
+            - op: equals
+              path: effective.memberAcknowledged
+              value: true
+    sideEffects:
+      - type: archive_claim
+        field: archivedAt
+        message: "Archived claim {{claim.id}}"
+
+cyclePolicies:
+  - id: information_request_loop
+    description: Limit repeated information requests in the assessment loop
+    path:
+      - UNDER_ASSESSMENT
+      - PENDING_INFO
+      - DOCUMENTS_VERIFIED
+      - UNDER_ASSESSMENT
+    maxCycles: 3
+    errorMessage: "Maximum information requests exceeded — escalate to team lead"
+
