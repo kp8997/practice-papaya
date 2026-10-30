@@ -51,9 +51,11 @@ export function computeDataDelta(
     const beforeVal = beforeData[key];
     const afterVal = afterData[key];
     if (!isDeepStrictEqual(beforeVal, afterVal)) {
+      const removed = !(key in afterData) || afterVal === undefined;
       delta[key] = {
         before: beforeVal === undefined ? null : structuredClone(beforeVal),
         after: afterVal === undefined ? null : structuredClone(afterVal),
+        ...(removed ? { removed: true } : {}),
       };
     }
   }
@@ -140,7 +142,7 @@ export function replayClaimHistory(
     stateHistory.push(entry.toState);
 
     for (const [field, change] of Object.entries(entry.delta)) {
-      if (change.after === null) {
+      if (change.removed) {
         delete data[field];
       } else {
         data[field] = structuredClone(change.after);

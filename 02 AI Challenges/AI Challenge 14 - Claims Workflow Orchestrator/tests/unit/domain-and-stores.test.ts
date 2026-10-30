@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cloneAndFreeze } from "../../src/domain/freeze.js";
+import { createWorkflowError } from "../../src/domain/errors.js";
+import { cloneAndFreeze, deepFreeze } from "../../src/domain/freeze.js";
 import type { Claim } from "../../src/domain/types.js";
 import {
   AuditStore,
@@ -36,7 +37,33 @@ function makeSampleClaim(overrides: Partial<Claim> = {}): Claim {
 }
 
 describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () => {
-  describe("RuleEvaluator & Scoped Paths", () => {
+  describe("Immutability & Error Primitives (freeze.ts & errors.ts)", () => {
+    it("clones and deeply freezes nested objects and arrays so caller and consumer mutations fail", () => {
+      const source = { nested: { tags: ["initial"] } };
+      const frozen = cloneAndFreeze(source);
+
+      // Mutating original source does not affect the frozen clone
+      source.nested.tags.push("mutated-outside");
+      expect(frozen.nested.tags).toEqual(["initial"]);
+
+      // Mutating frozen clone throws TypeError
+      expect(() => {
+        (frozen.nested.tags as string[]).push("tamper");
+      }).toThrow(TypeError);
+
+      const err = createWorkflowError({
+        code: "UNAUTHORIZED_ROLE",
+        message: "Role not allowed",
+        claimId: "C-100",
+        requiredRoles: ["assessor"],
+      });
+      expect(Object.isFrozen(err)).toBe(true);
+      expect(Object.isFrozen(err.requiredRoles)).toBe(true);
+      expect(deepFreeze(42)).toBe(42);
+    });
+  });
+
+  describe("RuleEvaluator & Scoped Paths (rule-evaluator.ts)", () => {
     it("resolves claim.*, input.*, and effective.* scopes accurately (including nested paths)", () => {
       const claim = makeSampleClaim();
       const input = { amount: 12000, freshNote: "added now" };
@@ -57,9 +84,43 @@ describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () 
       expect(resolveScopedPath("claim.id", ctx)).toBe("C-100");
     });
 
-    it("evaluates leaf operators and rejects NaN / Infinity in numeric comparisons", () => {
+    it("rejects empty strings, whitespace-only strings, and arrays containing blank items in not_empty", () => {
+      const claim = makeSampleClaim();
+      const ctx: RuleEvaluationContext = {
+        claim,
+        input: {
+          blankText: "   ",
+          emptyArray: [],
+          arrayWithBlankItem: ["valid_doc.pdf", "   "],
+          validArray: ["valid_doc.pdf"],
+        },
+        effective: claim.data,
+        now: new Date("2026-10-05T00:00:00.000Z"),
+      };
+
+      expect(evaluateCondition({ op: "not_empty", path: "input.blankText" }, ctx).passed).toBe(
+        false
+      );
+      expect(evaluateCondition({ op: "not_empty", path: "input.emptyArray" }, ctx).passed).toBe(
+        false
+      );
+      expect(
+        evaluateCondition({ op: "not_empty", path: "input.arrayWithBlankItem" }, ctx).passed
+      ).toBe(false);
+      expect(evaluateCondition({ op: "not_empty", path: "input.validArray" }, ctx).passed).toBe(
+        true
+      );
+    });
+
+    it("evaluates present, equals, gt, gte, lte, lte_path, not, and rejects NaN / Infinity", () => {
       const claim = makeSampleClaim({
-        data: { amount: 12000, policyLimit: 10000, badNum: Number.NaN },
+        data: {
+          amount: 12000,
+          policyLimit: 10000,
+          badNum: Number.NaN,
+          infNum: Number.POSITIVE_INFINITY,
+          zeroVal: -0,
+        },
       });
       const ctx: RuleEvaluationContext = {
         claim,
@@ -67,6 +128,26 @@ describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () 
         effective: claim.data,
         now: new Date("2026-10-05T00:00:00.000Z"),
       };
+
+      expect(evaluateCondition({ op: "present", path: "effective.amount" }, ctx).passed).toBe(true);
+      expect(evaluateCondition({ op: "present", path: "effective.missing" }, ctx).passed).toBe(
+        false
+      );
+      expect(
+        evaluateCondition({ op: "equals", path: "effective.zeroVal", value: 0 }, ctx).passed
+      ).toBe(true);
+      expect(
+        evaluateCondition({ op: "gte", path: "effective.amount", value: 12000 }, ctx).passed
+      ).toBe(true);
+      expect(
+        evaluateCondition({ op: "lte", path: "effective.policyLimit", value: 10000 }, ctx).passed
+      ).toBe(true);
+      expect(
+        evaluateCondition(
+          { not: { op: "equals", path: "effective.amount", value: 9999 } },
+          ctx
+        ).passed
+      ).toBe(true);
 
       const lteOutcome = evaluateCondition(
         { op: "lte_path", path: "effective.amount", otherPath: "effective.policyLimit" },
@@ -76,11 +157,12 @@ describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () 
       expect(lteOutcome.reason).toContain("12000");
       expect(lteOutcome.reason).toContain("10000");
 
-      const nanOutcome = evaluateCondition(
-        { op: "gt", path: "effective.badNum", value: 0 },
-        ctx
+      expect(evaluateCondition({ op: "gt", path: "effective.badNum", value: 0 }, ctx).passed).toBe(
+        false
       );
-      expect(nanOutcome.passed).toBe(false);
+      expect(
+        evaluateCondition({ op: "lte", path: "effective.infNum", value: 999999 }, ctx).passed
+      ).toBe(false);
     });
 
     it("reports missing required items clearly in includes_all", () => {
@@ -116,7 +198,7 @@ describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () 
       expect(res[0]?.failureReason).toContain("itemized_receipt");
     });
 
-    it("evaluates days_in_state_gte and any_of combinators using the injected clock", () => {
+    it("evaluates days_in_state_gte and any_of / all_of combinators using the injected clock", () => {
       const claim = makeSampleClaim({
         state: "REJECTED",
         stateEnteredAt: "2026-10-01T00:00:00.000Z",
@@ -148,8 +230,8 @@ describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () 
     });
   });
 
-  describe("AuditStore Immutability, Deltas & Replay", () => {
-    it("enforces runtime immutability on audit entries and returned query arrays", () => {
+  describe("AuditStore Immutability, Deltas & Replay (audit-store.ts)", () => {
+    it("enforces runtime immutability on audit entries, isolates claims, and blocks array mutation", () => {
       const store = new AuditStore();
       const entry = store.append({
         claimId: "C-1",
@@ -163,10 +245,27 @@ describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () 
         claimVersion: 2,
       });
 
+      store.append({
+        claimId: "C-2",
+        timestamp: "2026-10-01T00:01:00.000Z",
+        fromState: null,
+        toState: "SUBMITTED",
+        triggeredBy: { userId: "system", role: "system" },
+        notes: "Other claim",
+        outcome: "SUCCESS",
+        workflowVersion: "1.0.0",
+        claimVersion: 1,
+      });
+
       expect(entry.from_state).toBe("SUBMITTED");
       expect(entry.to_state).toBe("DOCUMENTS_VERIFIED");
       expect(entry.triggered_by).toEqual({ userId: "u-clerk", role: "document_clerk" });
       expect(entry.reason).toBe("Verified all documents");
+
+      // Querying by claim ID returns only that claim's entries
+      expect(store.getByClaimId("C-1")).toHaveLength(1);
+      expect(store.getByClaimId("C-2")).toHaveLength(1);
+      expect(store.getAll()).toHaveLength(2);
 
       // Attempting to mutate any field or nested object must throw TypeError
       expect(() => {
@@ -182,13 +281,16 @@ describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () 
       }).toThrow(TypeError);
     });
 
-    it("computes concise field deltas and deterministically replays claim state from the audit trail", () => {
+    it("computes field deltas (including removed fields vs explicit null) and replays state accurately", () => {
       const store = new AuditStore();
 
-      const delta1 = computeDataDelta(
-        {},
-        { amount: 5000, policyLimit: 10000, submittedDocuments: ["id_card"] }
-      );
+      const snap1 = {
+        amount: 5000,
+        policyLimit: 10000,
+        submittedDocuments: ["id_card"],
+        assessmentStartedAt: "2026-10-01T00:00:00.000Z",
+      };
+      const delta1 = computeDataDelta({}, snap1);
       store.append({
         claimId: "C-77",
         timestamp: "2026-10-01T00:00:00.000Z",
@@ -216,12 +318,21 @@ describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () 
         claimVersion: 1,
       });
 
-      const delta2 = computeDataDelta(
-        { amount: 5000, policyLimit: 10000, submittedDocuments: ["id_card"] },
-        { amount: 5000, policyLimit: 10000, submittedDocuments: ["id_card", "invoice"] }
-      );
-      // Unchanged fields (amount, policyLimit) should not appear in delta2
-      expect(Object.keys(delta2)).toEqual(["submittedDocuments"]);
+      // In snap2: assessmentStartedAt is removed (e.g. timer reset), while optionalNote is explicitly null
+      const snap2 = {
+        amount: 5000,
+        policyLimit: 10000,
+        submittedDocuments: ["id_card", "invoice"],
+        optionalNote: null,
+      };
+      const delta2 = computeDataDelta(snap1, snap2);
+      expect(Object.keys(delta2).sort()).toEqual([
+        "assessmentStartedAt",
+        "optionalNote",
+        "submittedDocuments",
+      ]);
+      expect(delta2.assessmentStartedAt?.removed).toBe(true);
+      expect(delta2.optionalNote?.removed).toBeUndefined();
 
       store.append({
         claimId: "C-77",
@@ -241,15 +352,12 @@ describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () 
       expect(replayed.version).toBe(2);
       expect(replayed.stateHistory).toEqual(["SUBMITTED", "DOCUMENTS_VERIFIED"]);
       expect(replayed.deniedAttempts).toBe(1);
-      expect(replayed.data).toEqual({
-        amount: 5000,
-        policyLimit: 10000,
-        submittedDocuments: ["id_card", "invoice"],
-      });
+      expect(replayed.data).toEqual(snap2);
+      expect("assessmentStartedAt" in replayed.data).toBe(false);
     });
   });
 
-  describe("OutboxStore Transactional Isolation", () => {
+  describe("OutboxStore Transactional Isolation (outbox-store.ts)", () => {
     it("transitions PENDING events to DISPATCHED and isolates handler errors as FAILED", () => {
       const dispatchedMessages: string[] = [];
       const outbox = new OutboxStore({
@@ -285,7 +393,7 @@ describe("Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore", () 
       expect(processed[1]?.errorMessage).toBe("Downstream SMTP timeout");
       expect(dispatchedMessages).toEqual(["Claim C-1 ready"]);
       expect(outbox.getFailedEvents()).toHaveLength(1);
+      expect(outbox.getByClaimId("C-1")).toHaveLength(2);
     });
   });
 });
-

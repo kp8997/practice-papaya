@@ -76,7 +76,7 @@ function isFiniteNumber(value: unknown): value is number {
 function isNonEmpty(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   if (typeof value === "string") return value.trim().length > 0;
-  if (Array.isArray(value)) return value.length > 0;
+  if (Array.isArray(value)) return value.length > 0 && value.every((item) => isNonEmpty(item));
   if (typeof value === "number") return Number.isFinite(value);
   if (typeof value === "boolean") return true;
   if (typeof value === "object") return Object.keys(value).length > 0;
@@ -155,7 +155,7 @@ export function evaluateCondition(
 
     case "equals": {
       const actual = resolveScopedPath(condition.path, ctx);
-      const passed = Object.is(actual, condition.value);
+      const passed = actual === condition.value;
       return {
         passed,
         reason: passed

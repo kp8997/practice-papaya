@@ -48,6 +48,7 @@ export type AuditOutcome = "SUCCESS" | "DENIED";
 export interface AuditFieldChange {
   readonly before: unknown;
   readonly after: unknown;
+  readonly removed?: boolean;
 }
 
 export type AuditDelta = Readonly<Record<string, AuditFieldChange>>;
