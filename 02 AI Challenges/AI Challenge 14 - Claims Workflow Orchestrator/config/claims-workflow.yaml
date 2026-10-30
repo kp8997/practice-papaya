@@ -123,6 +123,10 @@ transitions:
           op: not_empty
           path: input.missingInfoDescription
     sideEffects:
+      - type: set_field
+        field: assessmentReportComplete
+        value: false
+        message: "Reset assessment report completion flag for claim {{claim.id}} while awaiting additional information"
       - type: notify
         target: member
         message: "Additional information requested for claim {{claim.id}}: {{input.missingInfoDescription}}"
