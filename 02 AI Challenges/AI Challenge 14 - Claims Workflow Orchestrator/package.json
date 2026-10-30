@@ -17,6 +17,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "commander": "^14.0.3",
+    "hono": "^4.13.14",
     "yaml": "^2.7.0",
     "zod": "^3.24.2"
   },
@@ -27,4 +30,3 @@
     "vitest": "^3.0.7"
   }
 }
-
