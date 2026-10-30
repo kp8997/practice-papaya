@@ -1,0 +1,46 @@
+
+> claims-workflow-orchestrator@1.0.0 test
+> vitest run --reporter=verbose
+
+
+ RUN  v3.2.7 /Users/khangphan/Projects/practice-papaya/02 AI Challenges/AI Challenge 14 - Claims Workflow Orchestrator
+
+ ✓ tests/unit/domain-and-stores.test.ts > Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore > Immutability & Error Primitives (freeze.ts & errors.ts) > clones and deeply freezes nested objects and arrays so caller and consumer mutations fail 1ms
+ ✓ tests/unit/domain-and-stores.test.ts > Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore > RuleEvaluator & Scoped Paths (rule-evaluator.ts) > resolves claim.*, input.*, and effective.* scopes accurately (including nested paths) 0ms
+ ✓ tests/unit/domain-and-stores.test.ts > Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore > RuleEvaluator & Scoped Paths (rule-evaluator.ts) > rejects empty strings, whitespace-only strings, and arrays containing blank items in not_empty 1ms
+ ✓ tests/unit/domain-and-stores.test.ts > Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore > RuleEvaluator & Scoped Paths (rule-evaluator.ts) > evaluates present, equals, gt, gte, lte, lte_path, not, and rejects NaN / Infinity 0ms
+ ✓ tests/unit/domain-and-stores.test.ts > Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore > RuleEvaluator & Scoped Paths (rule-evaluator.ts) > reports missing required items clearly in includes_all 0ms
+ ✓ tests/unit/domain-and-stores.test.ts > Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore > RuleEvaluator & Scoped Paths (rule-evaluator.ts) > evaluates days_in_state_gte and any_of / all_of combinators using the injected clock 0ms
+ ✓ tests/unit/domain-and-stores.test.ts > Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore > AuditStore Immutability, Deltas & Replay (audit-store.ts) > enforces runtime immutability on audit entries, isolates claims, and blocks array mutation 1ms
+ ✓ tests/unit/domain-and-stores.test.ts > Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore > AuditStore Immutability, Deltas & Replay (audit-store.ts) > computes field deltas (including removed fields vs explicit null) and replays state accurately 1ms
+ ✓ tests/unit/domain-and-stores.test.ts > Phase 2 — Domain Core, RuleEvaluator, AuditStore & OutboxStore > OutboxStore Transactional Isolation (outbox-store.ts) > transitions PENDING events to DISPATCHED and isolates handler errors as FAILED 1ms
+ ✓ tests/integration/extensibility.test.ts > Phase 4 — Config-Only Extensibility Proof (Zero Engine Code Changes) > orchestrates a new FRAUD_CHECK state and fraud_analyst role loaded purely from YAML config 17ms
+ ✓ tests/config/config-schema.test.ts > Phase 1 — Workflow Config Schema & Loader > loads and validates the primary claims-workflow.yaml matching all 8 spec states, 5 roles, and 9 transitions 13ms
+ ✓ tests/config/config-schema.test.ts > Phase 1 — Workflow Config Schema & Loader > rejects transitions referencing an undeclared target state 7ms
+ ✓ tests/config/config-schema.test.ts > Phase 1 — Workflow Config Schema & Loader > rejects transitions originating from a terminal state 5ms
+ ✓ tests/config/config-schema.test.ts > Phase 1 — Workflow Config Schema & Loader > rejects transitions referencing an undeclared role 6ms
+ ✓ tests/config/config-schema.test.ts > Phase 1 — Workflow Config Schema & Loader > rejects unreachable states and dead-end non-terminal states 4ms
+ ✓ tests/config/config-schema.test.ts > Phase 1 — Workflow Config Schema & Loader > rejects cycle policies whose path steps do not match real transitions 4ms
+ ✓ tests/config/config-schema.test.ts > Phase 1 — Workflow Config Schema & Loader > rejects malformed scoped paths in preconditions 4ms
+ ✓ tests/unit/orchestrator-engine.test.ts > Phase 3 — CycleDetector, SideEffects & WorkflowOrchestrator Unit Suite > counts only SUCCESS loop entries and flags the 4th attempt as exceeded 15ms
+ ✓ tests/unit/orchestrator-engine.test.ts > Phase 3 — CycleDetector, SideEffects & WorkflowOrchestrator Unit Suite > shows available transitions from current state including required roles and precondition status 8ms
+ ✓ tests/unit/orchestrator-engine.test.ts > Phase 3 — CycleDetector, SideEffects & WorkflowOrchestrator Unit Suite > enforces optimistic concurrency locking (expectedVersion) and idempotency keys (idempotencyKey) 8ms
+ ✓ tests/unit/orchestrator-engine.test.ts > Phase 3 — CycleDetector, SideEffects & WorkflowOrchestrator Unit Suite > enforces loop hygiene (resets assessmentReportComplete on PENDING_INFO and accumulates newDocuments) and assigned-assessor ownership 6ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Required Spec Scenarios (1–5) > Scenario 1 — Happy path: SUBMITTED -> DOCUMENTS_VERIFIED -> UNDER_ASSESSMENT -> APPROVED -> PAYMENT_INITIATED -> CLOSED 15ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Required Spec Scenarios (1–5) > Scenario 2 — Rejection path: SUBMITTED -> DOCUMENTS_VERIFIED -> UNDER_ASSESSMENT -> REJECTED -> CLOSED (via member acknowledgement) 8ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Required Spec Scenarios (1–5) > Scenario 2B — Rejection path closed automatically after 30-day appeal period expires 4ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Required Spec Scenarios (1–5) > Scenario 3 — Request more info loop: SUBMITTED -> DOCUMENTS_VERIFIED -> UNDER_ASSESSMENT -> PENDING_INFO -> DOCUMENTS_VERIFIED -> UNDER_ASSESSMENT -> APPROVED -> PAYMENT_INITIATED -> CLOSED 6ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Required Spec Scenarios (1–5) > Scenario 4 — Invalid transition: Attempt SUBMITTED -> APPROVED fails with specific error listing valid transitions 3ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Required Spec Scenarios (1–5) > Scenario 5 — Unauthorized role: Attempt transition with wrong role fails with specific error 3ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Additional Invalid Transition & Lookup Edge Cases > rejects transitions on a non-existent claim ID with CLAIM_NOT_FOUND 3ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Additional Invalid Transition & Lookup Edge Cases > rejects any transition out of terminal state CLOSED with TERMINAL_STATE 3ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Additional Invalid Transition & Lookup Edge Cases > rejects skipping APPROVED -> CLOSED directly and rejects unknown target states 3ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Precondition Enforcement & Role Violations Across All Transitions > enforces preconditions on document verification, assessor assignment, approval amount, rejection reason, pending info, and appeal expiry 4ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Precondition Enforcement & Role Violations Across All Transitions > blocks finance/assessor/undeclared role violations on payment and closure transitions 3ms
+ ✓ tests/integration/scenarios.test.ts > Phase 4 — End-to-End Claims Workflow Scenarios & Edge Cases > Cycle Limit Enforcement & Post-Limit Recovery > allows 3 information request cycles, blocks the 4th with the exact spec message, and allows subsequent approval 4ms
+
+ Test Files  5 passed (5)
+      Tests  33 passed (33)
+   Start at  23:56:55
+   Duration  346ms (transform 149ms, setup 0ms, collect 465ms, tests 165ms, environment 0ms, prepare 174ms)
+

@@ -1,19 +1,30 @@
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { replayClaimHistory } from "../src/engine/audit-store.js";
 import { loadWorkflowConfig } from "../src/engine/config-schema.js";
 import { WorkflowOrchestrator } from "../src/engine/orchestrator.js";
 import { ConsoleOutboxDispatcher } from "../src/engine/outbox-store.js";
-import { replayClaimHistory } from "../src/engine/audit-store.js";
 
-// Load the declarative workflow configuration
-const configPath = resolve(import.meta.dirname, "../config/claims-workflow.yaml");
-const config = loadWorkflowConfig(configPath);
+// Universal ESM directory resolution (compatible across all TypeScript & Node versions)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const baseConfigPath = resolve(__dirname, "../config/claims-workflow.yaml");
+const fraudConfigPath = resolve(__dirname, "../config/claims-workflow.fraud-check.yaml");
+
+const baseConfig = loadWorkflowConfig(baseConfigPath);
+const fraudConfig = loadWorkflowConfig(fraudConfigPath);
 
 console.log("================================================================================");
-console.log("          CLAIMS WORKFLOW ORCHESTRATOR — INTERACTIVE MANUAL VERIFICATION        ");
+console.log("   PART 1 — BASE WORKFLOW (claims-workflow.yaml v1.0.0: 8 States, 5 Roles)      ");
 console.log("================================================================================\n");
 
-// Initialize orchestrator with console dispatcher so you can see side effects live!
-const orchestrator = new WorkflowOrchestrator(config, {
+// Controllable clock so we can also manually test the 30-day appeal window!
+let simulatedNow = new Date("2026-10-01T09:00:00.000Z");
+const advanceSimulatedDays = (days: number) => {
+  simulatedNow = new Date(simulatedNow.getTime() + days * 24 * 60 * 60 * 1000);
+};
+
+const orchestrator = new WorkflowOrchestrator(baseConfig, {
+  clock: { now: () => simulatedNow },
   outboxDispatcher: ConsoleOutboxDispatcher,
 });
 
@@ -34,6 +45,7 @@ console.log("Claim Created:", {
   id: claim.id,
   state: claim.state,
   version: claim.version,
+  workflowVersion: claim.workflowVersion,
   data: claim.data,
 });
 
@@ -64,7 +76,9 @@ console.log("Transition Result:", {
 /* -------------------------------------------------------------------------- */
 /* STEP 4: TEST PRECONDITION FAILURE (Assessor not assigned)                   */
 /* -------------------------------------------------------------------------- */
-console.log("\n--- [STEP 4] Negative Test: Try DOCUMENTS_VERIFIED -> UNDER_ASSESSMENT without Assessor ---");
+console.log(
+  "\n--- [STEP 4] Negative Test: Try DOCUMENTS_VERIFIED -> UNDER_ASSESSMENT without Assessor ---"
+);
 const failedStep4 = orchestrator.transition({
   claimId: "CLM-2026",
   toState: "UNDER_ASSESSMENT",
@@ -80,7 +94,9 @@ console.log("Expected Failure:", {
 /* -------------------------------------------------------------------------- */
 /* STEP 5: ADVANCE TO UNDER_ASSESSMENT with Assigned Assessor                 */
 /* -------------------------------------------------------------------------- */
-console.log("\n--- [STEP 5] Transition: DOCUMENTS_VERIFIED -> UNDER_ASSESSMENT with Assessor Assigned ---");
+console.log(
+  "\n--- [STEP 5] Transition: DOCUMENTS_VERIFIED -> UNDER_ASSESSMENT with Assessor Assigned ---"
+);
 const res2 = orchestrator.transition({
   claimId: "CLM-2026",
   toState: "UNDER_ASSESSMENT",
@@ -205,14 +221,13 @@ console.log("Expected Terminal Failure:", {
 /* STEP 12: TEST CYCLE DETECTION (Loop limit of 3 cycles)                     */
 /* -------------------------------------------------------------------------- */
 console.log("\n--- [STEP 12] Testing Cycle Detection (Max 3 info loops, 4th rejected) ---");
-const loopClaim = orchestrator.createClaim({
+orchestrator.createClaim({
   id: "CLM-LOOP",
   data: {
     submittedDocuments: ["claim_form", "medical_report", "itemized_receipt"],
   },
 });
 
-// Setup claim in UNDER_ASSESSMENT
 orchestrator.transition({
   claimId: "CLM-LOOP",
   toState: "DOCUMENTS_VERIFIED",
@@ -225,7 +240,6 @@ orchestrator.transition({
   input: { assessorId: "assessor-alice" },
 });
 
-// Run 3 cycles of requesting more info and receiving it
 for (let cycle = 1; cycle <= 3; cycle++) {
   const reqInfo = orchestrator.transition({
     claimId: "CLM-LOOP",
@@ -248,10 +262,11 @@ for (let cycle = 1; cycle <= 3; cycle++) {
     input: { assessorId: "assessor-alice" },
   });
 
-  console.log(`Cycle #${cycle}: PENDING_INFO (ok: ${reqInfo.ok}) -> DOCUMENTS_VERIFIED (ok: ${docRes.ok}) -> UNDER_ASSESSMENT (ok: ${reassess.ok})`);
+  console.log(
+    `Cycle #${cycle}: PENDING_INFO (ok: ${reqInfo.ok}) -> DOCUMENTS_VERIFIED (ok: ${docRes.ok}) -> UNDER_ASSESSMENT (ok: ${reassess.ok})`
+  );
 }
 
-// 4th Attempt to request info: MUST FAIL WITH EXACT SPEC MESSAGE
 const fourthAttempt = orchestrator.transition({
   claimId: "CLM-LOOP",
   toState: "PENDING_INFO",
@@ -269,17 +284,20 @@ console.log("4th Cycle Request Result (Must be rejected):", {
 /* -------------------------------------------------------------------------- */
 console.log("\n--- [STEP 13] Audit Trail Immutability & Replay for CLM-2026 ---");
 const auditEntries = orchestrator.getAuditTrail("CLM-2026");
-console.log(`Total Audit Entries for CLM-2026: ${auditEntries.length} (including SUCCESS & DENIED attempts)`);
+console.log(
+  `Total Audit Entries for CLM-2026: ${auditEntries.length} (including SUCCESS & DENIED attempts)`
+);
 
-// Test Object.freeze tamper protection
 try {
-  (auditEntries[0] as any).reason = "TAMPERED_BY_ATTACKER";
+  (auditEntries[0] as unknown as { reason: string }).reason = "TAMPERED_BY_ATTACKER";
   console.log("ERROR: Mutation succeeded (should not happen!)");
 } catch (err) {
-  console.log("Tamper Protection Verified: Modifying audit entry threw TypeError ->", (err as Error).message);
+  console.log(
+    "Tamper Protection Verified: Modifying audit entry threw TypeError ->",
+    (err as Error).message
+  );
 }
 
-// Replay history purely from audit log
 const replayed = replayClaimHistory("CLM-2026", auditEntries);
 console.log("\nReplayed Claim State from Audit Log:", {
   claimId: replayed.claimId,
@@ -290,6 +308,191 @@ console.log("\nReplayed Claim State from Audit Log:", {
   finalDataKeys: Object.keys(replayed.data),
 });
 
+/* -------------------------------------------------------------------------- */
+/* STEP 14: REJECTION PATH & 30-DAY APPEAL WINDOW CLOCK CHECK                 */
+/* -------------------------------------------------------------------------- */
+console.log("\n--- [STEP 14] Rejection Path & 30-Day Appeal Period Expiry (CLM-APPEAL) ---");
+orchestrator.createClaim({
+  id: "CLM-APPEAL",
+  data: {
+    amount: 3200,
+    policyLimit: 10000,
+    submittedDocuments: ["claim_form", "medical_report", "itemized_receipt"],
+  },
+});
+orchestrator.transition({
+  claimId: "CLM-APPEAL",
+  toState: "DOCUMENTS_VERIFIED",
+  actor: { userId: "clerk-bob", role: "document_clerk" },
+});
+orchestrator.transition({
+  claimId: "CLM-APPEAL",
+  toState: "UNDER_ASSESSMENT",
+  actor: { userId: "lead-sarah", role: "team_lead" },
+  input: { assessorId: "assessor-alice" },
+});
+orchestrator.transition({
+  claimId: "CLM-APPEAL",
+  toState: "REJECTED",
+  actor: { userId: "assessor-alice", role: "assessor" },
+  input: {
+    assessmentReportComplete: true,
+    rejectionReason: "Non-covered elective procedure",
+  },
+});
+
+// Day 10: Too early to close without member acknowledgement
+advanceSimulatedDays(10);
+const earlyClose = orchestrator.transition({
+  claimId: "CLM-APPEAL",
+  toState: "CLOSED",
+  actor: { userId: "sys-cron", role: "system" },
+});
+console.log("Close attempt on Day 10 (Must fail):", {
+  ok: earlyClose.ok,
+  message: !earlyClose.ok ? earlyClose.error.message : null,
+});
+
+// Day 31 (+21 more days): Appeal window expired -> closes cleanly
+advanceSimulatedDays(21);
+const expiredClose = orchestrator.transition({
+  claimId: "CLM-APPEAL",
+  toState: "CLOSED",
+  actor: { userId: "sys-cron", role: "system" },
+});
+console.log("Close attempt on Day 31 (Must pass):", {
+  ok: expiredClose.ok,
+  currentState: expiredClose.ok ? expiredClose.claim.state : "FAILED",
+  archived: expiredClose.ok ? expiredClose.claim.data.archived : false,
+});
+
+/* ========================================================================== */
+/* PART 2 — EXTENDED FRAUD-CHECK WORKFLOW (claims-workflow.fraud-check.yaml)  */
+/* ========================================================================== */
 console.log("\n================================================================================");
-console.log("                   ALL MANUAL VERIFICATION STEPS COMPLETE!                     ");
+console.log("   PART 2 — EXTENSIBILITY DEMO (claims-workflow.fraud-check.yaml v1.1.0)        ");
+console.log("   Same WorkflowOrchestrator class, ZERO engine code changes!                   ");
+console.log("================================================================================\n");
+
+const fraudOrchestrator = new WorkflowOrchestrator(fraudConfig, {
+  outboxDispatcher: ConsoleOutboxDispatcher,
+});
+
+/* -------------------------------------------------------------------------- */
+/* STEP 15: LOW-RISK CLAIM PASSES FRAUD_CHECK -> UNDER_ASSESSMENT             */
+/* -------------------------------------------------------------------------- */
+console.log("--- [STEP 15] Low-Risk Claim (CLM-FRAUD-LOW, score = 18 <= 70) ---");
+fraudOrchestrator.createClaim({
+  id: "CLM-FRAUD-LOW",
+  data: {
+    amount: 4800,
+    policyLimit: 10000,
+    submittedDocuments: ["claim_form", "medical_report", "itemized_receipt"],
+  },
+});
+
+fraudOrchestrator.transition({
+  claimId: "CLM-FRAUD-LOW",
+  toState: "DOCUMENTS_VERIFIED",
+  actor: { userId: "clerk-bob", role: "document_clerk" },
+});
+
+// Inspect available transitions at DOCUMENTS_VERIFIED in v1.1.0 -> routes to FRAUD_CHECK!
+console.log(
+  "Next state from DOCUMENTS_VERIFIED in v1.1.0:",
+  fraudOrchestrator.getAvailableTransitions("CLM-FRAUD-LOW").map((t) => ({
+    to: t.to,
+    roles: t.roles,
+  }))
+);
+
+const enterFraudLow = fraudOrchestrator.transition({
+  claimId: "CLM-FRAUD-LOW",
+  toState: "FRAUD_CHECK",
+  actor: { userId: "clerk-bob", role: "document_clerk" },
+});
+console.log("Entered FRAUD_CHECK:", {
+  ok: enterFraudLow.ok,
+  state: enterFraudLow.ok ? enterFraudLow.claim.state : null,
+  fraudCheckStartedAt: enterFraudLow.ok ? enterFraudLow.claim.data.fraudCheckStartedAt : null,
+});
+
+const clearFraudLow = fraudOrchestrator.transition({
+  claimId: "CLM-FRAUD-LOW",
+  toState: "UNDER_ASSESSMENT",
+  actor: { userId: "fraud-diana", role: "fraud_analyst" },
+  input: {
+    fraudRiskScore: 18,
+    assessorId: "assessor-alice",
+  },
+  notes: "Provider & invoice cross-checked; low fraud risk",
+});
+console.log("Cleared FRAUD_CHECK -> UNDER_ASSESSMENT:", {
+  ok: clearFraudLow.ok,
+  state: clearFraudLow.ok ? clearFraudLow.claim.state : null,
+  workflowVersion: clearFraudLow.ok ? clearFraudLow.claim.workflowVersion : null,
+  fraudCleared: clearFraudLow.ok ? clearFraudLow.claim.data.fraudCleared : null,
+});
+
+/* -------------------------------------------------------------------------- */
+/* STEP 16: HIGH-RISK CLAIM BLOCKED FROM ASSESSMENT & FAST-FAIL REJECTED      */
+/* -------------------------------------------------------------------------- */
+console.log("\n--- [STEP 16] High-Risk Claim (CLM-FRAUD-HIGH, score = 92 > 70) ---");
+fraudOrchestrator.createClaim({
+  id: "CLM-FRAUD-HIGH",
+  data: {
+    amount: 9500,
+    policyLimit: 10000,
+    submittedDocuments: ["claim_form", "medical_report", "itemized_receipt"],
+  },
+});
+fraudOrchestrator.transition({
+  claimId: "CLM-FRAUD-HIGH",
+  toState: "DOCUMENTS_VERIFIED",
+  actor: { userId: "clerk-bob", role: "document_clerk" },
+});
+fraudOrchestrator.transition({
+  claimId: "CLM-FRAUD-HIGH",
+  toState: "FRAUD_CHECK",
+  actor: { userId: "clerk-bob", role: "document_clerk" },
+});
+
+// 16A: Fraud analyst tries to forward score 92 to UNDER_ASSESSMENT -> BLOCKED!
+const blockedHighRisk = fraudOrchestrator.transition({
+  claimId: "CLM-FRAUD-HIGH",
+  toState: "UNDER_ASSESSMENT",
+  actor: { userId: "fraud-diana", role: "fraud_analyst" },
+  input: {
+    fraudRiskScore: 92,
+    assessorId: "assessor-alice",
+  },
+});
+console.log("Attempt FRAUD_CHECK -> UNDER_ASSESSMENT with score 92 (Must fail):", {
+  ok: blockedHighRisk.ok,
+  errorCode: !blockedHighRisk.ok ? blockedHighRisk.error.code : null,
+  message: !blockedHighRisk.ok ? blockedHighRisk.error.message : null,
+});
+
+// 16B: Fraud analyst fast-fails claim directly FRAUD_CHECK -> REJECTED!
+const fastFailReject = fraudOrchestrator.transition({
+  claimId: "CLM-FRAUD-HIGH",
+  toState: "REJECTED",
+  actor: { userId: "fraud-diana", role: "fraud_analyst" },
+  input: {
+    fraudRiskScore: 92,
+    rejectionReason: "Altered hospital receipt metadata (fraud score 92)",
+  },
+});
+console.log("Fast-Fail FRAUD_CHECK -> REJECTED:", {
+  ok: fastFailReject.ok,
+  state: fastFailReject.ok ? fastFailReject.claim.state : null,
+  workflowVersion: fastFailReject.ok ? fastFailReject.auditEntry.workflowVersion : null,
+  auditTrailStates: fraudOrchestrator
+    .getAuditTrail("CLM-FRAUD-HIGH")
+    .filter((e) => e.outcome === "SUCCESS")
+    .map((e) => e.to_state),
+});
+
+console.log("\n================================================================================");
+console.log("            ALL 16 MANUAL VERIFICATION STEPS (v1.0.0 + v1.1.0) COMPLETE!        ");
 console.log("================================================================================\n");
