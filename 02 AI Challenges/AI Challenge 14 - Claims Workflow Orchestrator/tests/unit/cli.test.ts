@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CliSession, tokenizeCommand } from "../../src/cli/repl.js";
-import { executeAllScenarios, renderScenariosMarkdown } from "../../src/cli/scenarios.js";
+import { executeAllScenarios, renderScenariosMarkdown } from "../../scripts/scenarios/index.js";
 
 describe("Phase 5 — Interactive CLI & Scenario Runner", () => {
   it("tokenizes quoted CLI arguments cleanly", () => {
