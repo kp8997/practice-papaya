@@ -98,6 +98,10 @@ The orchestrator adheres to **KISS**, **DRY**, **SOLID**, and **Separation of Co
 
 ## 3. Workflow State Machine
 
+<p align="center">
+  <img src="docs/images/workflow-diagram.png" alt="Claims Workflow State Machine Diagram" width="380" />
+</p>
+
 ### State Transition Diagram (v1.0.0 Base + v1.1.0 Fraud Check Extension)
 
 ```mermaid

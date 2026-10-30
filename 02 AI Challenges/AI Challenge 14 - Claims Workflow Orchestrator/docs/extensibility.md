@@ -17,7 +17,56 @@ This document provides formal proof of the config-driven extensibility of the Cl
 
 ---
 
-## 2. Configuration Unified Diff
+## 2. Visual Topology Comparison (Before vs. After)
+
+### A. Base Workflow (`claims-workflow.yaml` v1.0.0 — 8 States)
+
+![Base Workflow State Machine Diagram](./images/workflow-diagram.png)
+
+```mermaid
+stateDiagram-v2
+    [*] --> SUBMITTED
+    SUBMITTED --> DOCUMENTS_VERIFIED: document_clerk
+    DOCUMENTS_VERIFIED --> UNDER_ASSESSMENT: team_lead
+    UNDER_ASSESSMENT --> PENDING_INFO: assessor
+    PENDING_INFO --> DOCUMENTS_VERIFIED: document_clerk
+    UNDER_ASSESSMENT --> APPROVED: assessor
+    UNDER_ASSESSMENT --> REJECTED: assessor
+    APPROVED --> PAYMENT_INITIATED: finance
+    PAYMENT_INITIATED --> CLOSED: finance
+    REJECTED --> CLOSED: system / finance
+    REJECTED --> UNDER_ASSESSMENT: team_lead (appeal <= 30d)
+    CLOSED --> [*]
+```
+
+### B. Extended Workflow (`claims-workflow.fraud-check.yaml` v1.1.0 — 9 States)
+
+![Extended Workflow State Machine Diagram with Fraud Check](./images/fraud-workflow-diagram.svg)
+
+```mermaid
+stateDiagram-v2
+    [*] --> SUBMITTED
+    SUBMITTED --> DOCUMENTS_VERIFIED: document_clerk
+    DOCUMENTS_VERIFIED --> FRAUD_CHECK: document_clerk (Extension)
+    DOCUMENTS_VERIFIED --> UNDER_ASSESSMENT: team_lead (Legacy path)
+
+    FRAUD_CHECK --> UNDER_ASSESSMENT: fraud_analyst, team_lead (Score <= 70)
+    FRAUD_CHECK --> REJECTED: fraud_analyst (Score > 70)
+
+    UNDER_ASSESSMENT --> PENDING_INFO: assessor
+    PENDING_INFO --> DOCUMENTS_VERIFIED: document_clerk
+    UNDER_ASSESSMENT --> APPROVED: assessor
+    UNDER_ASSESSMENT --> REJECTED: assessor
+    APPROVED --> PAYMENT_INITIATED: finance
+    PAYMENT_INITIATED --> CLOSED: finance
+    REJECTED --> CLOSED: system / finance
+    REJECTED --> UNDER_ASSESSMENT: team_lead (Appeal <= 30d)
+    CLOSED --> [*]
+```
+
+---
+
+## 3. Configuration Unified Diff
 
 ```diff
 --- config/claims-workflow.yaml (v1.0.0)
@@ -132,7 +181,7 @@ This document provides formal proof of the config-driven extensibility of the Cl
 
 ---
 
-## 3. Automated Extensibility Verification
+## 4. Automated Extensibility Verification
 
 The extended workflow was verified with automated test suites in [`tests/integration/extensibility.test.ts`](../tests/integration/extensibility.test.ts):
 
@@ -145,4 +194,3 @@ The extended workflow was verified with automated test suites in [`tests/integra
    - `DOCUMENTS_VERIFIED` -> `FRAUD_CHECK`
    - Attempt `FRAUD_CHECK` -> `UNDER_ASSESSMENT` fails with precondition error: `Fraud risk score within acceptable threshold (0 to 70)`
    - `FRAUD_CHECK` -> `REJECTED` by `fraud_analyst` succeeds and dispatches compliance notification to applicant.
-
