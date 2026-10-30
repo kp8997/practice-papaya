@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claims Workflow Orchestrator — Workbench</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0ea5e9;
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.15);
+      --warning: #f59e0b;
+      --warning-bg: rgba(245, 158, 11, 0.15);
+      --danger: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.15);
+      --info: #6366f1;
+      --info-bg: rgba(99, 102, 241, 0.15);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text-main); min-height: 100vh; display: flex; flex-direction: column; }
+    
+    /* Top Header */
+    header { background: #0b1120; border-bottom: 1px solid var(--card-border); padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand h1 { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; }
+    .badge { font-size: 0.72rem; padding: 3px 8px; border-radius: 9999px; font-weight: 600; text-transform: uppercase; }
+    .badge-workflow { background: #0369a1; color: #e0f2fe; }
+    .clock-widget { display: flex; align-items: center; gap: 8px; background: #1e293b; padding: 6px 14px; border-radius: 8px; border: 1px solid var(--card-border); font-size: 0.85rem; }
+    .clock-time { font-family: monospace; color: var(--primary); font-weight: 600; }
+    .btn { background: #334155; color: var(--text-main); border: 1px solid #475569; padding: 6px 12px; border-radius: 6px; font-size: 0.82rem; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+    .btn:hover { background: #475569; }
+    .btn-primary { background: #0284c7; border-color: #0369a1; }
+    .btn-primary:hover { background: #0369a1; }
+    .btn-success { background: #059669; border-color: #047857; }
+    .btn-success:hover { background: #047857; }
+    .btn-danger { background: #dc2626; border-color: #b91c1c; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-sm { padding: 4px 8px; font-size: 0.75rem; }
+
+    /* Main Container */
+    main { display: grid; grid-template-columns: 320px 1fr; gap: 20px; padding: 20px 24px; flex: 1; }
+
+    /* Left Sidebar: Claims */
+    .sidebar { display: flex; flex-direction: column; gap: 14px; }
+    .panel { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 16px; }
+    .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .panel-header h2 { font-size: 0.95rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+    .claim-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 220px); overflow-y: auto; }
+    .claim-card { background: #0f172a; border: 1px solid var(--card-border); border-radius: 8px; padding: 12px; cursor: pointer; transition: all 0.15s; }
+    .claim-card:hover { border-color: var(--primary); }
+    .claim-card.active { border-color: var(--primary); background: rgba(56, 189, 248, 0.08); box-shadow: 0 0 0 1px var(--primary); }
+    .claim-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .claim-card-id { font-weight: 700; font-size: 0.92rem; }
+    .claim-card-meta { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-muted); }
+
+    /* State Pills */
+    .pill { font-size: 0.72rem; padding: 2px 7px; border-radius: 4px; font-weight: 600; display: inline-block; }
+    .pill-SUBMITTED { background: #1e3a8a; color: #bfdbfe; }
+    .pill-DOCUMENTS_VERIFIED { background: #1e293b; color: #93c5fd; border: 1px solid #3b82f6; }
+    .pill-UNDER_ASSESSMENT { background: #4c1d95; color: #ddd6fe; }
+    .pill-PENDING_INFO { background: #78350f; color: #fde68a; }
+    .pill-APPROVED { background: #064e3b; color: #a7f3d0; }
+    .pill-REJECTED { background: #7f1d1d; color: #fecaca; }
+    .pill-PAYMENT_INITIATED { background: #831843; color: #fbcfe8; }
+    .pill-CLOSED { background: #27272a; color: #a1a1aa; border: 1px solid #52525b; }
+    .pill-FRAUD_CHECK { background: #854d0e; color: #fef08a; }
+
+    /* Right Workbench */
+    .workbench { display: flex; flex-direction: column; gap: 18px; }
+
+    /* Workflow Pipeline Stepper */
+    .stepper { display: flex; gap: 6px; overflow-x: auto; padding: 12px; background: #0f172a; border-radius: 8px; border: 1px solid var(--card-border); }
+    .step-node { display: flex; flex-direction: column; align-items: center; min-width: 105px; padding: 8px 6px; border-radius: 6px; background: #1e293b; border: 1px solid #334155; opacity: 0.6; transition: all 0.2s; }
+    .step-node.active { opacity: 1; border-color: var(--primary); background: rgba(56, 189, 248, 0.12); box-shadow: 0 0 8px rgba(56, 189, 248, 0.3); }
+    .step-node.terminal { border-style: dashed; }
+    .step-name { font-size: 0.72rem; font-weight: 700; text-align: center; }
+
+    /* Claim Overview Grid */
+    .overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+    .stat-box { background: #0f172a; border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; }
+    .stat-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; }
+    .stat-val { font-size: 1rem; font-weight: 700; }
+
+    /* Cycle Progress Meter */
+    .cycle-meter { background: #0f172a; border: 1px solid var(--card-border); border-radius: 8px; padding: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .cycle-text { font-size: 0.82rem; }
+    .cycle-bars { display: flex; gap: 6px; }
+    .cycle-block { width: 34px; height: 10px; border-radius: 3px; background: #334155; }
+    .cycle-block.filled { background: var(--warning); }
+    .cycle-block.limit { background: var(--danger); }
+
+    /* Available Transitions Section */
+    .transitions-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+    .transition-card { background: #0f172a; border: 1px solid var(--card-border); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .transition-card.ready { border-left: 4px solid var(--success); }
+    .transition-card.blocked { border-left: 4px solid var(--warning); }
+    .transition-header { display: flex; justify-content: space-between; align-items: center; }
+    .transition-title { font-size: 1rem; font-weight: 700; color: var(--primary); }
+    .preconditions-box { background: #1e293b; border-radius: 6px; padding: 10px 12px; font-size: 0.8rem; display: flex; flex-direction: column; gap: 6px; }
+    .precondition-item { display: flex; align-items: flex-start; gap: 8px; }
+    .check-pass { color: var(--success); font-weight: 700; }
+    .check-fail { color: var(--danger); font-weight: 700; }
+
+    /* Form Fields */
+    .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    .form-group label { font-size: 0.75rem; color: var(--text-muted); font-weight: 500; }
+    .form-control { background: #0f172a; border: 1px solid var(--card-border); color: var(--text-main); padding: 7px 10px; border-radius: 6px; font-size: 0.82rem; }
+    .form-control:focus { outline: none; border-color: var(--primary); }
+
+    /* Tabs & Ledger Viewers */
+    .tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--card-border); padding-bottom: 8px; margin-bottom: 12px; }
+    .tab-btn { background: transparent; border: none; color: var(--text-muted); font-size: 0.85rem; font-weight: 600; cursor: pointer; padding: 6px 12px; border-radius: 6px; }
+    .tab-btn.active { color: var(--primary); background: #0f172a; }
+    .ledger-list { display: flex; flex-direction: column; gap: 8px; max-height: 380px; overflow-y: auto; }
+    .audit-entry { background: #0f172a; border: 1px solid var(--card-border); border-radius: 6px; padding: 10px 12px; font-size: 0.8rem; display: flex; flex-direction: column; gap: 6px; }
+    .audit-entry.SUCCESS { border-left: 3px solid var(--success); }
+    .audit-entry.DENIED { border-left: 3px solid var(--danger); }
+    .audit-header { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 0.75rem; }
+    .audit-trajectory { font-weight: 600; color: var(--text-main); }
+    .delta-viewer { font-family: monospace; background: #080d1a; padding: 6px; border-radius: 4px; font-size: 0.75rem; color: #38bdf8; overflow-x: auto; }
+
+    /* Notification Alert Toast */
+    #toast { position: fixed; bottom: 20px; right: 24px; padding: 12px 18px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; display: none; z-index: 999; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+    .toast-success { background: #065f46; color: #d1fae5; border: 1px solid #10b981; }
+    .toast-error { background: #991b1b; color: #fee2e2; border: 1px solid #ef4444; }
+
+    /* Modal */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); display: none; justify-content: center; align-items: center; z-index: 1000; }
+    .modal { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; width: 480px; max-width: 90vw; padding: 20px; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <span style="font-size: 1.4rem;">🛡️</span>
+      <div>
+        <h1 id="workflow-title">Claims Workflow Orchestrator</h1>
+        <span class="badge badge-workflow" id="workflow-version">v1.0.0</span>
+      </div>
+    </div>
+    
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div class="clock-widget">
+        <span>🕒</span>
+        <span class="clock-time" id="simulated-clock">--</span>
+        <button class="btn btn-sm" onclick="advanceClock(1)">+1d</button>
+        <button class="btn btn-sm" onclick="advanceClock(7)">+7d</button>
+        <button class="btn btn-sm btn-primary" onclick="advanceClock(31)" title="Fast-forward past 30-day appeal expiration">+31d (Appeal)</button>
+      </div>
+
+      <button class="btn btn-sm" onclick="seedSampleClaims()">🌱 Seed Demo Claims</button>
+      <button class="btn btn-sm btn-success" onclick="openCreateModal()">+ New Claim</button>
+      <button class="btn btn-sm btn-danger" onclick="resetDatabase()" title="Reset in-memory claims">Reset</button>
+    </div>
+  </header>
+
+  <!-- Main Body Grid -->
+  <main>
+    <!-- Left Sidebar: Claims Directory -->
+    <div class="sidebar">
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Active Claims (<span id="claim-count">0</span>)</h2>
+        </div>
+        <div class="claim-list" id="claim-list">
+          <div style="color: var(--text-muted); font-size: 0.8rem; text-align: center; padding: 20px;">
+            No claims loaded. Click "Seed Demo Claims" or "+ New Claim".
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Workbench: Selected Claim Detail -->
+    <div class="workbench" id="workbench-area">
+      <!-- Stepper Pipeline -->
+      <div class="stepper" id="workflow-stepper">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Claim Overview Details -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Claim Details: <span id="view-claim-id" style="color: var(--primary);">--</span></h2>
+          <span id="view-claim-state-pill" class="pill">--</span>
+        </div>
+
+        <div class="overview-grid">
+          <div class="stat-box">
+            <div class="stat-label">Claimed Amount</div>
+            <div class="stat-val" id="view-amount">--</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Policy Limit</div>
+            <div class="stat-val" id="view-limit">--</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Version</div>
+            <div class="stat-val" id="view-version">--</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Assigned Assessor</div>
+            <div class="stat-val" id="view-assessor">None</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 12px; font-size: 0.8rem; color: var(--text-muted);">
+          <strong>Submitted Documents:</strong> <span id="view-docs">none</span>
+        </div>
+      </div>
+
+      <!-- Information Loop / Cycle Detection Meter -->
+      <div class="cycle-meter" id="cycle-meter-card">
+        <div class="cycle-text">
+          <strong>Information Request Cycle Meter</strong> (Max: 3 cycles before mandatory team lead escalation)
+          <div id="cycle-detail-text" style="color: var(--text-muted); font-size: 0.75rem; margin-top: 2px;">
+            Current count: 0 of 3 cycles used.
+          </div>
+        </div>
+        <div class="cycle-bars">
+          <div class="cycle-block" id="cycle-bar-1"></div>
+          <div class="cycle-block" id="cycle-bar-2"></div>
+          <div class="cycle-block" id="cycle-bar-3"></div>
+        </div>
+      </div>
+
+      <!-- Available Transitions & Guardrail Checklist -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Available Transitions & Guardrails</h2>
+        </div>
+        <div class="transitions-grid" id="transitions-grid">
+          <div style="color: var(--text-muted); font-size: 0.85rem;">Select a claim to inspect transitions.</div>
+        </div>
+      </div>
+
+      <!-- Dual Ledgers: Immutable Audit Trail & Transactional Outbox -->
+      <div class="panel">
+        <div class="tabs">
+          <button class="tab-btn active" id="tab-audit-btn" onclick="switchLedgerTab('audit')">Immutable Audit Trail (<span id="audit-count">0</span>)</button>
+          <button class="tab-btn" id="tab-outbox-btn" onclick="switchLedgerTab('outbox')">Transactional Outbox Events (<span id="outbox-count">0</span>)</button>
+        </div>
+
+        <!-- Audit Tab Pane -->
+        <div id="tab-audit-pane">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div id="replay-badge" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7;">Replay Check: OK</div>
+          </div>
+          <div class="ledger-list" id="audit-list">
+            <!-- Entries dynamically rendered -->
+          </div>
+        </div>
+
+        <!-- Outbox Tab Pane -->
+        <div id="tab-outbox-pane" style="display: none;">
+          <div class="ledger-list" id="outbox-list">
+            <!-- Events dynamically rendered -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Modal: Create New Claim -->
+  <div class="modal-backdrop" id="create-modal">
+    <div class="modal">
+      <div class="panel-header">
+        <h2 style="color: var(--text-main);">Create New Insurance Claim</h2>
+        <button class="btn btn-sm" onclick="closeCreateModal()">✕</button>
+      </div>
+
+      <form id="create-claim-form" onsubmit="handleCreateSubmit(event)" style="display: flex; flex-direction: column; gap: 12px;">
+        <div class="form-group">
+          <label>Claim ID (optional, auto-generated if blank)</label>
+          <input type="text" id="new-id" class="form-control" placeholder="e.g. C-101">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Claim Amount ($)</label>
+            <input type="number" id="new-amount" class="form-control" value="6500" required>
+          </div>
+          <div class="form-group">
+            <label>Policy Limit ($)</label>
+            <input type="number" id="new-limit" class="form-control" value="10000" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Included Documents</label>
+          <label style="font-size: 0.8rem; display: flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="doc-form" checked> claim_form
+          </label>
+          <label style="font-size: 0.8rem; display: flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="doc-report" checked> medical_report
+          </label>
+          <label style="font-size: 0.8rem; display: flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="doc-receipt" checked> itemized_receipt
+          </label>
+        </div>
+        <div class="form-group">
+          <label>Initial Notes</label>
+          <input type="text" id="new-notes" class="form-control" placeholder="e.g. Outpatient emergency treatment">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+          <button type="button" class="btn" onclick="closeCreateModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Claim</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Notification Toast -->
+  <div id="toast"></div>
+
+  <script>
+    let currentWorkflow = null;
+    let claims = [];
+    let selectedClaimId = null;
+    let selectedClaimDetail = null;
+
+    // Toast Notification Helper
+    function showToast(msg, isError = false) {
+      const t = document.getElementById("toast");
+      t.textContent = msg;
+      t.className = isError ? "toast-error" : "toast-success";
+      t.style.display = "block";
+      setTimeout(() => { t.style.display = "none"; }, 4000);
+    }
+
+    // Modal helpers
+    function openCreateModal() { document.getElementById("create-modal").style.display = "flex"; }
+    function closeCreateModal() { document.getElementById("create-modal").style.display = "none"; }
+
+    // Tab switcher
+    function switchLedgerTab(tab) {
+      document.getElementById("tab-audit-btn").className = tab === 'audit' ? 'tab-btn active' : 'tab-btn';
+      document.getElementById("tab-outbox-btn").className = tab === 'outbox' ? 'tab-btn active' : 'tab-btn';
+      document.getElementById("tab-audit-pane").style.display = tab === 'audit' ? 'block' : 'none';
+      document.getElementById("tab-outbox-pane").style.display = tab === 'outbox' ? 'block' : 'none';
+    }
+
+    // Initial load
+    async function init() {
+      await fetchWorkflow();
+      await fetchClaims();
+    }
+
+    async function fetchWorkflow() {
+      try {
+        const res = await fetch("/api/workflow");
+        const json = await res.json();
+        if (json.ok) {
+          currentWorkflow = json.config;
+          document.getElementById("workflow-title").textContent = currentWorkflow.name;
+          document.getElementById("workflow-version").textContent = "v" + currentWorkflow.version;
+          updateClockUI(json.clock.iso);
+          renderStepper();
+        }
+      } catch (err) {
+        console.error("Failed to fetch workflow:", err);
+      }
+    }
+
+    function updateClockUI(iso) {
+      document.getElementById("simulated-clock").textContent = new Date(iso).toISOString().replace("T", " ").slice(0, 19);
+    }
+
+    async function advanceClock(days) {
+      try {
+        const res = await fetch("/api/clock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ days })
+        });
+        const json = await res.json();
+        if (json.ok) {
+          updateClockUI(json.clock.iso);
+          showToast(`Clock advanced by ${days} day(s).`);
+          if (selectedClaimId) await selectClaim(selectedClaimId);
+        }
+      } catch (err) {
+        showToast("Failed to advance clock", true);
+      }
+    }
+
+    async function seedSampleClaims() {
+      try {
+        const res = await fetch("/api/seed", { method: "POST" });
+        const json = await res.json();
+        showToast(json.message);
+        await fetchClaims();
+        if (!selectedClaimId && json.seeded?.length > 0) {
+          selectClaim(json.seeded[0]);
+        }
+      } catch (err) {
+        showToast("Error seeding claims", true);
+      }
+    }
+
+    async function resetDatabase() {
+      if (!confirm("Reset in-memory database to clean slate?")) return;
+      try {
+        const res = await fetch("/api/reset", { method: "POST" });
+        const json = await res.json();
+        showToast(json.message);
+        selectedClaimId = null;
+        selectedClaimDetail = null;
+        await fetchClaims();
+      } catch (err) {
+        showToast("Error resetting database", true);
+      }
+    }
+
+    async function fetchClaims() {
+      try {
+        const res = await fetch("/api/claims");
+        const json = await res.json();
+        if (json.ok) {
+          claims = json.claims;
+          document.getElementById("claim-count").textContent = claims.length;
+          renderClaimList();
+          if (selectedClaimId) {
+            await selectClaim(selectedClaimId);
+          } else if (claims.length > 0) {
+            await selectClaim(claims[0].id);
+          } else {
+            clearWorkbench();
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch claims:", err);
+      }
+    }
+
+    function renderClaimList() {
+      const container = document.getElementById("claim-list");
+      if (claims.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.8rem; text-align: center; padding: 20px;">No claims yet. Click "Seed Demo Claims".</div>';
+        return;
+      }
+
+      container.innerHTML = claims.map(c => {
+        const isActive = c.id === selectedClaimId ? "active" : "";
+        const amount = c.data?.amount ? "$" + Number(c.data.amount).toLocaleString() : "N/A";
+        return `
+          <div class="claim-card ${isActive}" onclick="selectClaim('${c.id}')">
+            <div class="claim-card-top">
+              <span class="claim-card-id">${c.id}</span>
+              <span class="pill pill-${c.state}">${c.state}</span>
+            </div>
+            <div class="claim-card-meta">
+              <span>Amount: ${amount}</span>
+              <span>v${c.version}</span>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderStepper() {
+      if (!currentWorkflow) return;
+      const stepper = document.getElementById("workflow-stepper");
+      const states = Object.keys(currentWorkflow.states);
+
+      stepper.innerHTML = states.map(s => {
+        const def = currentWorkflow.states[s];
+        const isCurrent = selectedClaimDetail?.claim?.state === s;
+        const activeClass = isCurrent ? "active" : "";
+        const terminalClass = def.terminal ? "terminal" : "";
+        return `
+          <div class="step-node ${activeClass} ${terminalClass}" title="${def.description}">
+            <span class="step-name">${s}</span>
+            ${def.terminal ? '<span style="font-size: 0.65rem; color: #a1a1aa;">TERMINAL</span>' : ''}
+            ${isCurrent ? '<span style="font-size: 0.65rem; color: #38bdf8; font-weight: bold;">CURRENT</span>' : ''}
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function selectClaim(id) {
+      selectedClaimId = id;
+      renderClaimList();
+
+      try {
+        const res = await fetch(`/api/claims/${encodeURIComponent(id)}`);
+        const json = await res.json();
+        if (json.ok) {
+          selectedClaimDetail = json;
+          renderWorkbench();
+          await fetchAuditTrail(id);
+          await fetchOutbox(id);
+        }
+      } catch (err) {
+        console.error("Failed to select claim:", err);
+      }
+    }
+
+    function clearWorkbench() {
+      document.getElementById("view-claim-id").textContent = "--";
+      document.getElementById("view-claim-state-pill").textContent = "--";
+      document.getElementById("view-amount").textContent = "--";
+      document.getElementById("view-limit").textContent = "--";
+      document.getElementById("view-version").textContent = "--";
+      document.getElementById("view-assessor").textContent = "None";
+      document.getElementById("view-docs").textContent = "none";
+      document.getElementById("transitions-grid").innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem;">No claim selected.</div>';
+    }
+
+    function renderWorkbench() {
+      if (!selectedClaimDetail) return;
+      const { claim, availableTransitions } = selectedClaimDetail;
+
+      renderStepper();
+
+      document.getElementById("view-claim-id").textContent = claim.id;
+      const pill = document.getElementById("view-claim-state-pill");
+      pill.textContent = claim.state;
+      pill.className = `pill pill-${claim.state}`;
+
+      document.getElementById("view-amount").textContent = claim.data?.amount ? "$" + Number(claim.data.amount).toLocaleString() : "N/A";
+      document.getElementById("view-limit").textContent = claim.data?.policyLimit ? "$" + Number(claim.data.policyLimit).toLocaleString() : "N/A";
+      document.getElementById("view-version").textContent = `v${claim.version}`;
+      document.getElementById("view-assessor").textContent = claim.data?.assessorId || "Unassigned";
+
+      const docs = claim.data?.submittedDocuments || [];
+      document.getElementById("view-docs").textContent = docs.length > 0 ? docs.join(", ") : "none";
+
+      // Cycle Meter
+      const cycleInfo = availableTransitions.find(t => t.cycleStatus)?.cycleStatus;
+      const cycleCount = cycleInfo ? cycleInfo.currentCount : 0;
+      document.getElementById("cycle-detail-text").textContent = `Current count: ${cycleCount} of 3 information request cycles used.`;
+      for (let i = 1; i <= 3; i++) {
+        const el = document.getElementById(`cycle-bar-${i}`);
+        el.className = "cycle-block" + (i <= cycleCount ? (cycleCount >= 3 ? " limit" : " filled") : "");
+      }
+
+      // Transitions
+      const grid = document.getElementById("transitions-grid");
+      if (availableTransitions.length === 0) {
+        grid.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; padding: 12px; background: #0f172a; border-radius: 6px;">No outgoing transitions available (claim is in a terminal state).</div>';
+        return;
+      }
+
+      grid.innerHTML = availableTransitions.map(t => {
+        const isReady = t.allPreconditionsMet;
+        const readyTag = isReady ? '<span class="badge" style="background:#065f46; color:#a7f3d0;">READY</span>' : '<span class="badge" style="background:#78350f; color:#fde68a;">UNMET GUARDS</span>';
+        const rolePills = t.roles.map(r => `<span class="pill" style="background:#334155;">${r}</span>`).join(" ");
+
+        const guardsHtml = t.preconditions.map(p => `
+          <div class="precondition-item">
+            <span class="${p.passed ? 'check-pass' : 'check-fail'}">${p.passed ? '✓' : '✗'}</span>
+            <div>
+              <span>${p.description}</span>
+              ${!p.passed && p.failureReason ? `<div style="font-size:0.75rem; color:#f87171;">Reason: ${p.failureReason}</div>` : ''}
+            </div>
+          </div>
+        `).join("");
+
+        // Determine dynamic inputs
+        const target = t.to;
+        let dynamicFields = '';
+        if (target === 'UNDER_ASSESSMENT') {
+          dynamicFields = `
+            <div class="form-group">
+              <label>Assign Assessor ID</label>
+              <input type="text" id="input-${target}-assessorId" class="form-control" value="${claim.data?.assessorId || 'assessor-alice'}">
+            </div>
+          `;
+        } else if (target === 'APPROVED') {
+          dynamicFields = `
+            <div class="form-group">
+              <label style="display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="input-${target}-report" checked> assessmentReportComplete
+              </label>
+            </div>
+          `;
+        } else if (target === 'REJECTED') {
+          dynamicFields = `
+            <div class="form-group">
+              <label>Rejection Reason</label>
+              <input type="text" id="input-${target}-reason" class="form-control" value="Non-covered cosmetic treatment">
+            </div>
+            <div class="form-group">
+              <label style="display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="input-${target}-report" checked> assessmentReportComplete
+              </label>
+            </div>
+          `;
+        } else if (target === 'PENDING_INFO') {
+          dynamicFields = `
+            <div class="form-group">
+              <label>Missing Info Description</label>
+              <input type="text" id="input-${target}-missing" class="form-control" value="Need itemized pharmacy receipt">
+            </div>
+          `;
+        } else if (target === 'DOCUMENTS_VERIFIED' && claim.state === 'PENDING_INFO') {
+          dynamicFields = `
+            <div class="form-group">
+              <label>New Documents (comma separated)</label>
+              <input type="text" id="input-${target}-newdocs" class="form-control" value="pharmacy_receipt.pdf">
+            </div>
+          `;
+        } else if (target === 'CLOSED' && claim.state === 'PAYMENT_INITIATED') {
+          dynamicFields = `
+            <div class="form-row">
+              <div class="form-group">
+                <label>Payment Reference</label>
+                <input type="text" id="input-${target}-payref" class="form-control" value="PAY-${claim.id}-TX101">
+              </div>
+              <div class="form-group">
+                <label style="display:flex; align-items:center; gap:6px; margin-top:18px;">
+                  <input type="checkbox" id="input-${target}-payconfirm" checked> paymentConfirmed
+                </label>
+              </div>
+            </div>
+          `;
+        } else if (target === 'CLOSED' && claim.state === 'REJECTED') {
+          dynamicFields = `
+            <div class="form-group">
+              <label style="display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="input-${target}-ack"> memberAcknowledged (Or use +31d clock advance)
+              </label>
+            </div>
+          `;
+        }
+
+        const defaultRole = t.roles[0];
+        const defaultUser = defaultRole === 'assessor' && claim.data?.assessorId ? claim.data.assessorId : `u-${defaultRole}`;
+
+        return `
+          <div class="transition-card ${isReady ? 'ready' : 'blocked'}">
+            <div class="transition-header">
+              <div>
+                <span class="transition-title">→ ${t.to}</span>
+                <div style="margin-top:4px;">Authorized: ${rolePills}</div>
+              </div>
+              ${readyTag}
+            </div>
+
+            <div class="preconditions-box">
+              <div style="font-weight:600; font-size:0.75rem; color:var(--text-muted); margin-bottom:2px;">PRECONDITIONS:</div>
+              ${guardsHtml}
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Actor Role</label>
+                <select id="role-${target}" class="form-control">
+                  ${currentWorkflow.roles.map(r => `<option value="${r}" ${r === defaultRole ? 'selected' : ''}>${r}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Actor User ID</label>
+                <input type="text" id="user-${target}" class="form-control" value="${defaultUser}">
+              </div>
+            </div>
+
+            ${dynamicFields}
+
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:4px;">
+              <button class="btn btn-primary" onclick="executeTransition('${target}')">Execute Transition → ${target}</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function executeTransition(targetState) {
+      if (!selectedClaimId) return;
+
+      const role = document.getElementById(`role-${targetState}`).value;
+      const userId = document.getElementById(`user-${targetState}`).value;
+
+      const payload = {
+        toState: targetState,
+        actor: { role, userId },
+        input: {}
+      };
+
+      // Collect optional inputs
+      const assessorIdEl = document.getElementById(`input-${targetState}-assessorId`);
+      if (assessorIdEl) payload.input.assessorId = assessorIdEl.value;
+
+      const reportEl = document.getElementById(`input-${targetState}-report`);
+      if (reportEl) payload.input.assessmentReportComplete = reportEl.checked;
+
+      const reasonEl = document.getElementById(`input-${targetState}-reason`);
+      if (reasonEl) payload.input.rejectionReason = reasonEl.value;
+
+      const missingEl = document.getElementById(`input-${targetState}-missing`);
+      if (missingEl) payload.input.missingInfoDescription = missingEl.value;
+
+      const newDocsEl = document.getElementById(`input-${targetState}-newdocs`);
+      if (newDocsEl) {
+        payload.input.newDocuments = newDocsEl.value.split(',').map(s => s.trim()).filter(Boolean);
+      }
+
+      const payConfirmEl = document.getElementById(`input-${targetState}-payconfirm`);
+      if (payConfirmEl) payload.input.paymentConfirmed = payConfirmEl.checked;
+
+      const payRefEl = document.getElementById(`input-${targetState}-payref`);
+      if (payRefEl) payload.input.paymentReference = payRefEl.value;
+
+      const ackEl = document.getElementById(`input-${targetState}-ack`);
+      if (ackEl && ackEl.checked) payload.input.memberAcknowledged = true;
+
+      try {
+        const res = await fetch(`/api/claims/${encodeURIComponent(selectedClaimId)}/advance`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const json = await res.json();
+
+        if (json.ok) {
+          showToast(`Transition successful: ${targetState}`);
+          await fetchClaims();
+        } else {
+          showToast(`[${json.error?.code || 'ERROR'}] ${json.error?.message || 'Transition denied'}`, true);
+          await fetchAuditTrail(selectedClaimId);
+        }
+      } catch (err) {
+        showToast("Network request failed", true);
+      }
+    }
+
+    async function fetchAuditTrail(id) {
+      try {
+        const res = await fetch(`/api/claims/${encodeURIComponent(id)}/audit`);
+        const json = await res.json();
+        if (json.ok) {
+          document.getElementById("audit-count").textContent = json.count;
+          const badge = document.getElementById("replay-badge");
+          if (json.replay) {
+            badge.textContent = `Replay Check: OK (v${json.replay.version}, ${json.replay.deniedAttempts} denied)`;
+            badge.style.background = "rgba(16, 185, 129, 0.2)";
+            badge.style.color = "#6ee7b7";
+          }
+          renderAuditTrail(json.entries);
+        }
+      } catch (err) {
+        console.error("Failed to fetch audit trail:", err);
+      }
+    }
+
+    function renderAuditTrail(entries) {
+      const container = document.getElementById("audit-list");
+      if (!entries || entries.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.8rem; padding: 12px;">No audit entries yet.</div>';
+        return;
+      }
+
+      container.innerHTML = entries.map(e => {
+        const deltaKeys = Object.keys(e.delta || {});
+        const deltaHtml = deltaKeys.length > 0 
+          ? `<div class="delta-viewer">delta: ${JSON.stringify(e.delta)}</div>`
+          : '';
+
+        return `
+          <div class="audit-entry ${e.outcome}">
+            <div class="audit-header">
+              <span>${e.id} • ${new Date(e.timestamp).toISOString().replace("T", " ").slice(0, 19)}</span>
+              <span class="badge" style="background:${e.outcome === 'SUCCESS' ? '#065f46' : '#7f1d1d'}; color:${e.outcome === 'SUCCESS' ? '#a7f3d0' : '#fecaca'};">${e.outcome}${e.errorCode ? ' (' + e.errorCode + ')' : ''}</span>
+            </div>
+            <div class="audit-trajectory">
+              ${e.from_state || 'INITIAL'} → ${e.to_state}
+            </div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">
+              Triggered By: <strong>${e.triggered_by.userId}</strong> (${e.triggered_by.role})
+            </div>
+            <div style="font-size:0.78rem;">
+              Reason: ${e.reason}
+            </div>
+            ${deltaHtml}
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function fetchOutbox(id) {
+      try {
+        const res = await fetch(`/api/claims/${encodeURIComponent(id)}/outbox`);
+        const json = await res.json();
+        if (json.ok) {
+          document.getElementById("outbox-count").textContent = json.count;
+          renderOutbox(json.events);
+        }
+      } catch (err) {
+        console.error("Failed to fetch outbox:", err);
+      }
+    }
+
+    function renderOutbox(events) {
+      const container = document.getElementById("outbox-list");
+      if (!events || events.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.8rem; padding: 12px;">No outbox events recorded for this claim.</div>';
+        return;
+      }
+
+      container.innerHTML = events.map(e => `
+        <div class="audit-entry SUCCESS">
+          <div class="audit-header">
+            <span>${e.id} • ${new Date(e.createdAt).toISOString().replace("T", " ").slice(0, 19)}</span>
+            <span class="badge" style="background:#0369a1; color:#e0f2fe;">[${e.status}]</span>
+          </div>
+          <div style="font-weight:600; color:var(--primary);">
+            Event: ${e.type} ${e.target ? '→ ' + e.target : ''}
+          </div>
+          <div style="font-size:0.8rem;">
+            ${e.message}
+          </div>
+        </div>
+      `).join("");
+    }
+
+    async function handleCreateSubmit(e) {
+      e.preventDefault();
+      const id = document.getElementById("new-id").value.trim() || undefined;
+      const amount = Number(document.getElementById("new-amount").value);
+      const policyLimit = Number(document.getElementById("new-limit").value);
+      const notes = document.getElementById("new-notes").value.trim() || undefined;
+
+      const docs = [];
+      if (document.getElementById("doc-form").checked) docs.push("claim_form");
+      if (document.getElementById("doc-report").checked) docs.push("medical_report");
+      if (document.getElementById("doc-receipt").checked) docs.push("itemized_receipt");
+
+      try {
+        const res = await fetch("/api/claims", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id,
+            notes,
+            data: {
+              amount,
+              policyLimit,
+              submittedDocuments: docs
+            }
+          })
+        });
+        const json = await res.json();
+        if (json.ok) {
+          closeCreateModal();
+          showToast(`Claim ${json.claim.id} created.`);
+          await fetchClaims();
+          await selectClaim(json.claim.id);
+        } else {
+          showToast(json.error?.message || "Failed to create claim", true);
+        }
+      } catch (err) {
+        showToast("Error creating claim", true);
+      }
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>

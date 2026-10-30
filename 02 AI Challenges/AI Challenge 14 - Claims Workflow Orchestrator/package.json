@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "tsx src/cli/repl.ts",
+    "web": "tsx src/web/server.ts",
     "scenarios": "tsx src/cli/scenarios.ts",
     "verify": "tsx scripts/manual-verify.ts",
     "test": "vitest run",

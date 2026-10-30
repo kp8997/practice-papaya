@@ -1,0 +1,332 @@
+{
+  "info": {
+    "_postman_id": "7b8e1f33-9fe8-4160-93b4-40b9e1f33284",
+    "name": "Claims Workflow Orchestrator API",
+    "description": "Postman Collection for Papaya AI Challenge 14 — Claims Workflow Orchestrator.\nIncludes Happy Path, Role Rejections, Precondition Failures, Cycle Detection, Appeal Clock Fast-Forward, and Audit Trail Replay verification.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "claimId",
+      "value": "C-POSTMAN-1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. System & Workflow Discovery",
+      "item": [
+        {
+          "name": "GET Workflow Config & States",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workflow",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflow"]
+            },
+            "description": "Returns active workflow definition, all states, authorized roles, and cycle policies."
+          }
+        },
+        {
+          "name": "POST Seed Demo Claims",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/seed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "seed"]
+            },
+            "description": "Seeds 3 sample claims: C-HAPPY (SUBMITTED), C-ASSESS (UNDER_ASSESSMENT), and C-REJECTED (REJECTED)."
+          }
+        },
+        {
+          "name": "GET List All Claims",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/claims",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Happy Path Flow (SUBMITTED -> CLOSED)",
+      "item": [
+        {
+          "name": "Step 1: Create Claim C-POSTMAN-1",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{claimId}}\",\n  \"notes\": \"Emergency dental surgery claim\",\n  \"data\": {\n    \"amount\": 6500,\n    \"policyLimit\": 10000,\n    \"submittedDocuments\": [\"claim_form\", \"medical_report\", \"itemized_receipt\"]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims"]
+            }
+          }
+        },
+        {
+          "name": "Step 2: Inspect State & Available Transitions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/{{claimId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "{{claimId}}"]
+            }
+          }
+        },
+        {
+          "name": "Step 3: SUBMITTED -> DOCUMENTS_VERIFIED (document_clerk)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toState\": \"DOCUMENTS_VERIFIED\",\n  \"actor\": {\n    \"userId\": \"clerk-bob\",\n    \"role\": \"document_clerk\"\n  },\n  \"notes\": \"All 3 required documents verified\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/{{claimId}}/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "{{claimId}}", "advance"]
+            }
+          }
+        },
+        {
+          "name": "Step 4: DOCUMENTS_VERIFIED -> UNDER_ASSESSMENT (team_lead assigns assessor)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toState\": \"UNDER_ASSESSMENT\",\n  \"actor\": {\n    \"userId\": \"lead-sarah\",\n    \"role\": \"team_lead\"\n  },\n  \"input\": {\n    \"assessorId\": \"assessor-alice\"\n  },\n  \"notes\": \"Assigning claim to assessor-alice\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/{{claimId}}/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "{{claimId}}", "advance"]
+            }
+          }
+        },
+        {
+          "name": "Step 5: UNDER_ASSESSMENT -> APPROVED (assessor completes report)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toState\": \"APPROVED\",\n  \"actor\": {\n    \"userId\": \"assessor-alice\",\n    \"role\": \"assessor\"\n  },\n  \"input\": {\n    \"assessmentReportComplete\": true\n  },\n  \"notes\": \"Approved within policy limit\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/{{claimId}}/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "{{claimId}}", "advance"]
+            }
+          }
+        },
+        {
+          "name": "Step 6: APPROVED -> PAYMENT_INITIATED (finance)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toState\": \"PAYMENT_INITIATED\",\n  \"actor\": {\n    \"userId\": \"finance-frank\",\n    \"role\": \"finance\"\n  },\n  \"notes\": \"Payment batch queued\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/{{claimId}}/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "{{claimId}}", "advance"]
+            }
+          }
+        },
+        {
+          "name": "Step 7: PAYMENT_INITIATED -> CLOSED (finance confirms payment)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toState\": \"CLOSED\",\n  \"actor\": {\n    \"userId\": \"finance-frank\",\n    \"role\": \"finance\"\n  },\n  \"input\": {\n    \"paymentConfirmed\": true,\n    \"paymentReference\": \"PAY-REF-9099\"\n  },\n  \"notes\": \"Payment confirmed by clearing house\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/{{claimId}}/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "{{claimId}}", "advance"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Guardrails & Negative Tests (Must Fail 422)",
+      "item": [
+        {
+          "name": "FAIL: Unauthorized Role (document_clerk -> APPROVED)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toState\": \"APPROVED\",\n  \"actor\": {\n    \"userId\": \"clerk-bob\",\n    \"role\": \"document_clerk\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/C-ASSESS/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "C-ASSESS", "advance"]
+            },
+            "description": "Expected: 422 UNAUTHORIZED_ROLE"
+          }
+        },
+        {
+          "name": "FAIL: Maker-Checker Assessor Mismatch",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toState\": \"APPROVED\",\n  \"actor\": {\n    \"userId\": \"assessor-intruder\",\n    \"role\": \"assessor\"\n  },\n  \"input\": {\n    \"assessmentReportComplete\": true\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/C-ASSESS/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "C-ASSESS", "advance"]
+            },
+            "description": "Expected: 422 UNAUTHORIZED_ROLE (Claim assigned to assessor-alice, not assessor-intruder)"
+          }
+        },
+        {
+          "name": "FAIL: Precondition Failure (Amount > Policy Limit)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toState\": \"APPROVED\",\n  \"actor\": {\n    \"userId\": \"assessor-alice\",\n    \"role\": \"assessor\"\n  },\n  \"input\": {\n    \"assessmentReportComplete\": true,\n    \"amount\": 15000\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/C-ASSESS/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "C-ASSESS", "advance"]
+            },
+            "description": "Expected: 422 PRECONDITION_FAILED (Claim amount 15000 exceeds policyLimit 10000)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Cycle Limit & 30-Day Appeal Fast-Forward",
+      "item": [
+        {
+          "name": "Cycle Limit: 4th Info Request Blocked",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toState\": \"PENDING_INFO\",\n  \"actor\": {\n    \"userId\": \"assessor-alice\",\n    \"role\": \"assessor\"\n  },\n  \"input\": {\n    \"missingInfoDescription\": \"4th request attempt\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/C-ASSESS/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "C-ASSESS", "advance"]
+            },
+            "description": "Run after 3 info loops. Expected: 422 CYCLE_LIMIT_EXCEEDED with 'Maximum information requests exceeded — escalate to team lead'"
+          }
+        },
+        {
+          "name": "Fast-Forward Simulated Clock +31 Days",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"days\": 31\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/clock",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "clock"]
+            },
+            "description": "Simulates 31 days elapsed so 30-day appeal period expires."
+          }
+        },
+        {
+          "name": "Close Rejected Claim (system actor after 30d)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toState\": \"CLOSED\",\n  \"actor\": {\n    \"userId\": \"sys-archive-cron\",\n    \"role\": \"system\"\n  },\n  \"notes\": \"Archiving claim after 30-day appeal window elapsed\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/C-REJECTED/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "C-REJECTED", "advance"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Observability & Audit Trail",
+      "item": [
+        {
+          "name": "GET Immutable Audit Trail & Replay Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/{{claimId}}/audit",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "{{claimId}}", "audit"]
+            },
+            "description": "Returns full immutable audit entries (SUCCESS and DENIED), field deltas, and deterministic replay integrity check."
+          }
+        },
+        {
+          "name": "GET Transactional Outbox Events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/{{claimId}}/outbox",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "{{claimId}}", "outbox"]
+            },
+            "description": "Returns side-effect notifications dispatched by the transactional outbox."
+          }
+        },
+        {
+          "name": "POST Reset In-Memory Database",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/reset",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "reset"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
