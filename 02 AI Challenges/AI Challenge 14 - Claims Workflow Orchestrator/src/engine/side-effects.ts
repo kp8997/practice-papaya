@@ -1,20 +1,13 @@
 import { cloneAndFreeze } from "../domain/freeze.js";
 import type { ExecutedSideEffect, OutboxEvent } from "../domain/types.js";
-import type { SideEffectConfig } from "./config-schema.js";
 import type { OutboxStore } from "./outbox-store.js";
-import { resolveScopedPath, type RuleEvaluationContext } from "./rule-evaluator.js";
-
-export interface PreparedSideEffectPlan {
-  readonly config: SideEffectConfig;
-  readonly renderedMessage: string;
-  readonly patchedFields?: Readonly<Record<string, unknown>>;
-  readonly clearedFields?: readonly string[];
-}
-
-export interface SideEffectMutationResult {
-  readonly nextData: Record<string, unknown>;
-  readonly plans: readonly PreparedSideEffectPlan[];
-}
+import { resolveScopedPath } from "./rule-evaluator.js";
+import type {
+  PreparedSideEffectPlan,
+  RuleEvaluationContext,
+  SideEffectConfig,
+  SideEffectMutationResult,
+} from "./types.js";
 
 /**
  * Interpolates `{{scope.path}}` placeholders in side-effect message templates
@@ -173,4 +166,3 @@ export function enqueueAndDispatchSideEffects(
     outboxEvents: dispatchedEvents,
   };
 }
-

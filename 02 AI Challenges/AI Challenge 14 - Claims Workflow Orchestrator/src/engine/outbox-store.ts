@@ -2,21 +2,11 @@ import { cloneAndFreeze, deepFreeze } from "../domain/freeze.js";
 import type { Clock, OutboxEvent } from "../domain/types.js";
 import { SystemClock } from "../domain/types.js";
 
-export interface EnqueueOutboxInput {
-  readonly claimId: string;
-  readonly auditEntryId: string;
-  readonly timestamp: string;
-  readonly type: string;
-  readonly target?: string;
-  readonly message: string;
-}
-
-export type OutboxDispatcher = (event: OutboxEvent) => void;
-
-export interface OutboxStoreOptions {
-  readonly clock?: Clock;
-  readonly dispatcher?: OutboxDispatcher;
-}
+import type {
+  EnqueueOutboxInput,
+  OutboxDispatcher,
+  OutboxStoreOptions,
+} from "./types.js";
 
 /**
  * Default console dispatcher used when running interactive CLI or scenario scripts.

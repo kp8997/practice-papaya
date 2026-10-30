@@ -50,11 +50,13 @@ The orchestrator adheres to **KISS**, **DRY**, **SOLID**, and **Separation of Co
 │   │   ├── freeze.ts                    # Deep recursive immutability enforcement (Object.freeze)
 │   │   └── paths.ts                     # Dot-notation path accessor (claim.*, input.*, effective.*)
 │   ├── engine/                          # Workflow Engine Core
+│   │   ├── types.ts                     # Engine-level contracts, DTOs and configuration interfaces
 │   │   ├── config-schema.ts             # Zod validation schema for workflow YAML configs
 │   │   ├── rule-evaluator.ts            # Declarative precondition evaluator (equals, gt, includes_all, etc.)
 │   │   ├── cycle-detector.ts            # Cycle detection and loop counter
 │   │   ├── audit-store.ts               # Immutable append-only audit trail and history replay
 │   │   ├── outbox-store.ts              # Transactional outbox store and dispatchers
+│   │   ├── side-effects.ts              # Side-effect mutation planner and dispatcher
 │   │   └── orchestrator.ts              # Central workflow execution engine
 │   ├── cli/                             # Interactive CLI Adapter
 │   │   ├── parser.ts                    # Command tokenizer and syntax parsing

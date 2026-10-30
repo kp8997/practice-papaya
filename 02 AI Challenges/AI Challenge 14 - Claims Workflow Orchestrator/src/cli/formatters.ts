@@ -1,6 +1,6 @@
 import type { AuditReportView, ClaimDetailView } from "../app/types.js";
 import type { Claim, OutboxEvent, TransitionResult } from "../domain/types.js";
-import type { WorkflowConfig } from "../engine/config-schema.js";
+import type { WorkflowConfig } from "../engine/types.js";
 
 export function formatWorkflow(cfg: WorkflowConfig): string {
   const lines = [

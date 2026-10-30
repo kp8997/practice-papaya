@@ -1,8 +1,9 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Claim, OutboxEvent, TransitionResult } from "../domain/types.js";
-import { loadWorkflowConfig, type WorkflowConfig } from "../engine/config-schema.js";
+import { loadWorkflowConfig } from "../engine/config-schema.js";
 import { WorkflowOrchestrator } from "../engine/orchestrator.js";
+import type { WorkflowConfig } from "../engine/types.js";
 import type {
   AdvanceClaimSessionInput,
   AuditReportView,

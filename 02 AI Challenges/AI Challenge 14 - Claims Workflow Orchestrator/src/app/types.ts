@@ -4,7 +4,7 @@ import type {
   AvailableTransition,
   Claim,
 } from "../domain/types.js";
-import type { ReplayedClaimTrajectory } from "../engine/audit-store.js";
+import type { ReplayedClaimTrajectory } from "../engine/types.js";
 
 export interface SessionOptions {
   readonly configPath?: string;

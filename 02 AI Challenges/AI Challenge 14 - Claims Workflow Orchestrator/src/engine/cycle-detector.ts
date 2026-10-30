@@ -1,6 +1,6 @@
 import { cloneAndFreeze } from "../domain/freeze.js";
 import type { AuditEntry, CycleStatusPreview } from "../domain/types.js";
-import type { CyclePolicy } from "./config-schema.js";
+import type { CyclePolicy } from "./types.js";
 
 /**
  * Stateless cycle detector that derives loop iteration counts directly from the

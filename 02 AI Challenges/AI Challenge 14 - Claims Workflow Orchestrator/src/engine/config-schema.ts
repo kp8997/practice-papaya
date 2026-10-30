@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import type { Condition, LeafCondition, WorkflowConfig } from "./types.js";
 
 /**
  * Valid scoped data paths used inside declarative precondition checks:
@@ -15,28 +16,7 @@ export const ScopedPathSchema = z
     "Path must start with 'claim.', 'input.', or 'effective.' followed by a valid property path"
   );
 
-export type ScopedPath = z.infer<typeof ScopedPathSchema>;
-
 const PrimitiveValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
-
-export type PrimitiveValue = z.infer<typeof PrimitiveValueSchema>;
-
-export type LeafCondition =
-  | { op: "present"; path: ScopedPath }
-  | { op: "not_empty"; path: ScopedPath }
-  | { op: "equals"; path: ScopedPath; value: PrimitiveValue }
-  | { op: "gt"; path: ScopedPath; value: number }
-  | { op: "gte"; path: ScopedPath; value: number }
-  | { op: "lte"; path: ScopedPath; value: number }
-  | { op: "lte_path"; path: ScopedPath; otherPath: ScopedPath }
-  | { op: "includes_all"; path: ScopedPath; requiredPath: ScopedPath }
-  | { op: "days_in_state_gte"; days: number };
-
-export type Condition =
-  | LeafCondition
-  | { all_of: Condition[] }
-  | { any_of: Condition[] }
-  | { not: Condition };
 
 const LeafConditionSchema: z.ZodType<LeafCondition> = z.discriminatedUnion("op", [
   z.object({ op: z.literal("present"), path: ScopedPathSchema }).strict(),
@@ -88,8 +68,6 @@ export const PreconditionSchema = z
     check: ConditionSchema,
   })
   .strict();
-
-export type PreconditionConfig = z.infer<typeof PreconditionSchema>;
 
 export const SideEffectSchema = z.discriminatedUnion("type", [
   z
@@ -145,16 +123,12 @@ export const SideEffectSchema = z.discriminatedUnion("type", [
     .strict(),
 ]);
 
-export type SideEffectConfig = z.infer<typeof SideEffectSchema>;
-
 export const StateDefinitionSchema = z
   .object({
     description: z.string().min(1),
     terminal: z.boolean().default(false),
   })
   .strict();
-
-export type StateDefinition = z.infer<typeof StateDefinitionSchema>;
 
 export const TransitionDefinitionSchema = z
   .object({
@@ -166,8 +140,6 @@ export const TransitionDefinitionSchema = z
   })
   .strict();
 
-export type TransitionDefinition = z.infer<typeof TransitionDefinitionSchema>;
-
 export const CyclePolicySchema = z
   .object({
     id: z.string().min(1),
@@ -178,14 +150,208 @@ export const CyclePolicySchema = z
   })
   .strict();
 
-export type CyclePolicy = z.infer<typeof CyclePolicySchema>;
-
 export const WorkflowDefaultsSchema = z
   .object({
     requiredDocuments: z.array(z.string().min(1)).default([]),
   })
   .strict()
   .default({ requiredDocuments: [] });
+
+function validateRoles(roles: readonly string[], ctx: z.RefinementCtx): Set<string> {
+  const roleSet = new Set<string>();
+  roles.forEach((role, idx) => {
+    if (roleSet.has(role)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["roles", idx],
+        message: `Duplicate role '${role}' in roles list`,
+      });
+    }
+    roleSet.add(role);
+  });
+  return roleSet;
+}
+
+function validateStates(
+  initialState: string,
+  states: Record<string, z.infer<typeof StateDefinitionSchema>>,
+  ctx: z.RefinementCtx
+): void {
+  const initialStateDef = states[initialState];
+  if (!initialStateDef) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["initialState"],
+      message: `Initial state '${initialState}' is not defined in states`,
+    });
+  } else if (initialStateDef.terminal) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["initialState"],
+      message: `Initial state '${initialState}' cannot be marked terminal`,
+    });
+  }
+
+  const hasTerminal = Object.values(states).some((def) => def.terminal);
+  if (!hasTerminal) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["states"],
+      message: "Workflow must declare at least one terminal state",
+    });
+  }
+}
+
+interface TransitionTopology {
+  readonly edgeSet: Set<string>;
+  readonly outgoingByState: Map<string, string[]>;
+}
+
+function validateTransitions(
+  transitions: readonly z.infer<typeof TransitionDefinitionSchema>[],
+  states: Record<string, z.infer<typeof StateDefinitionSchema>>,
+  roleSet: Set<string>,
+  ctx: z.RefinementCtx
+): TransitionTopology {
+  const edgeSet = new Set<string>();
+  const outgoingByState = new Map<string, string[]>();
+
+  transitions.forEach((t, idx) => {
+    const fromDef = states[t.from];
+    const toDef = states[t.to];
+
+    if (!fromDef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transitions", idx, "from"],
+        message: `Transition references unknown source state '${t.from}'`,
+      });
+    } else if (fromDef.terminal) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transitions", idx, "from"],
+        message: `Terminal state '${t.from}' cannot have outgoing transitions`,
+      });
+    }
+
+    if (!toDef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transitions", idx, "to"],
+        message: `Transition references unknown target state '${t.to}'`,
+      });
+    }
+
+    const edgeKey = `${t.from}->${t.to}`;
+    if (edgeSet.has(edgeKey)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transitions", idx],
+        message: `Duplicate transition '${t.from} -> ${t.to}'`,
+      });
+    }
+    edgeSet.add(edgeKey);
+
+    const list = outgoingByState.get(t.from) ?? [];
+    list.push(t.to);
+    outgoingByState.set(t.from, list);
+
+    t.roles.forEach((role, roleIdx) => {
+      if (!roleSet.has(role)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["transitions", idx, "roles", roleIdx],
+          message: `Transition '${t.from} -> ${t.to}' references undeclared role '${role}'`,
+        });
+      }
+    });
+  });
+
+  return { edgeSet, outgoingByState };
+}
+
+function validateReachability(
+  initialState: string,
+  states: Record<string, z.infer<typeof StateDefinitionSchema>>,
+  outgoingByState: Map<string, string[]>,
+  ctx: z.RefinementCtx
+): void {
+  for (const [stateName, stateDef] of Object.entries(states)) {
+    if (!stateDef.terminal && (outgoingByState.get(stateName)?.length ?? 0) === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["states", stateName],
+        message: `Non-terminal state '${stateName}' has no outgoing transitions (dead-end state)`,
+      });
+    }
+  }
+
+  if (states[initialState]) {
+    const visited = new Set<string>([initialState]);
+    const queue: string[] = [initialState];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) continue;
+      for (const next of outgoingByState.get(current) ?? []) {
+        if (!visited.has(next)) {
+          visited.add(next);
+          queue.push(next);
+        }
+      }
+    }
+
+    for (const stateName of Object.keys(states)) {
+      if (!visited.has(stateName)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["states", stateName],
+          message: `State '${stateName}' is unreachable from initial state '${initialState}'`,
+        });
+      }
+    }
+  }
+}
+
+function validateCyclePolicies(
+  cyclePolicies: readonly z.infer<typeof CyclePolicySchema>[],
+  edgeSet: Set<string>,
+  ctx: z.RefinementCtx
+): void {
+  const policyIds = new Set<string>();
+  cyclePolicies.forEach((policy, idx) => {
+    if (policyIds.has(policy.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cyclePolicies", idx, "id"],
+        message: `Duplicate cycle policy id '${policy.id}'`,
+      });
+    }
+    policyIds.add(policy.id);
+
+    const first = policy.path[0];
+    const last = policy.path[policy.path.length - 1];
+    if (first !== last) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cyclePolicies", idx, "path"],
+        message: `Cycle policy '${policy.id}' path must start and end with the same state (got '${first}' ... '${last}')`,
+      });
+    }
+
+    for (let i = 0; i < policy.path.length - 1; i++) {
+      const from = policy.path[i];
+      const to = policy.path[i + 1];
+      if (!from || !to) continue;
+      if (!edgeSet.has(`${from}->${to}`)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["cyclePolicies", idx, "path", i],
+          message: `Cycle policy '${policy.id}' step '${from} -> ${to}' is not a defined transition`,
+        });
+      }
+    }
+  });
+}
 
 export const WorkflowConfigSchema = z
   .object({
@@ -200,179 +366,17 @@ export const WorkflowConfigSchema = z
   })
   .strict()
   .superRefine((config, ctx) => {
-    const stateNames = new Set(Object.keys(config.states));
-    const roleSet = new Set<string>();
-
-    // 1. Ensure roles are unique
-    config.roles.forEach((role, idx) => {
-      if (roleSet.has(role)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["roles", idx],
-          message: `Duplicate role '${role}' in roles list`,
-        });
-      }
-      roleSet.add(role);
-    });
-
-    // 2. Validate initialState exists and is not terminal
-    const initialStateDef = config.states[config.initialState];
-    if (!initialStateDef) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["initialState"],
-        message: `Initial state '${config.initialState}' is not defined in states`,
-      });
-    } else if (initialStateDef.terminal) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["initialState"],
-        message: `Initial state '${config.initialState}' cannot be marked terminal`,
-      });
-    }
-
-    // 3. Require at least one terminal state
-    const terminalStates = Object.entries(config.states)
-      .filter(([, def]) => def.terminal)
-      .map(([name]) => name);
-    if (terminalStates.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["states"],
-        message: "Workflow must declare at least one terminal state",
-      });
-    }
-
-    // 4. Validate transitions: state existence, terminal source, duplicate edges, and roles
-    const edgeSet = new Set<string>();
-    const outgoingByState = new Map<string, string[]>();
-
-    config.transitions.forEach((transition, idx) => {
-      const fromDef = config.states[transition.from];
-      const toDef = config.states[transition.to];
-
-      if (!fromDef) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["transitions", idx, "from"],
-          message: `Transition references unknown source state '${transition.from}'`,
-        });
-      } else if (fromDef.terminal) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["transitions", idx, "from"],
-          message: `Terminal state '${transition.from}' cannot have outgoing transitions`,
-        });
-      }
-
-      if (!toDef) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["transitions", idx, "to"],
-          message: `Transition references unknown target state '${transition.to}'`,
-        });
-      }
-
-      const edgeKey = `${transition.from}->${transition.to}`;
-      if (edgeSet.has(edgeKey)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["transitions", idx],
-          message: `Duplicate transition '${transition.from} -> ${transition.to}'`,
-        });
-      }
-      edgeSet.add(edgeKey);
-
-      const list = outgoingByState.get(transition.from) ?? [];
-      list.push(transition.to);
-      outgoingByState.set(transition.from, list);
-
-      transition.roles.forEach((role, roleIdx) => {
-        if (!roleSet.has(role)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["transitions", idx, "roles", roleIdx],
-            message: `Transition '${transition.from} -> ${transition.to}' references undeclared role '${role}'`,
-          });
-        }
-      });
-    });
-
-    // 5. Ensure every non-terminal state has at least one outgoing transition
-    for (const [stateName, stateDef] of Object.entries(config.states)) {
-      if (!stateDef.terminal && (outgoingByState.get(stateName)?.length ?? 0) === 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["states", stateName],
-          message: `Non-terminal state '${stateName}' has no outgoing transitions (dead-end state)`,
-        });
-      }
-    }
-
-    // 6. Reachability check via BFS from initialState
-    if (initialStateDef) {
-      const visited = new Set<string>([config.initialState]);
-      const queue: string[] = [config.initialState];
-      while (queue.length > 0) {
-        const current = queue.shift();
-        if (!current) continue;
-        for (const next of outgoingByState.get(current) ?? []) {
-          if (!visited.has(next)) {
-            visited.add(next);
-            queue.push(next);
-          }
-        }
-      }
-
-      for (const stateName of stateNames) {
-        if (!visited.has(stateName)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["states", stateName],
-            message: `State '${stateName}' is unreachable from initial state '${config.initialState}'`,
-          });
-        }
-      }
-    }
-
-    // 7. Validate cycle policies: closed loop and valid transition edges
-    const policyIds = new Set<string>();
-    config.cyclePolicies.forEach((policy, idx) => {
-      if (policyIds.has(policy.id)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["cyclePolicies", idx, "id"],
-          message: `Duplicate cycle policy id '${policy.id}'`,
-        });
-      }
-      policyIds.add(policy.id);
-
-      const first = policy.path[0];
-      const last = policy.path[policy.path.length - 1];
-      if (first !== last) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["cyclePolicies", idx, "path"],
-          message: `Cycle policy '${policy.id}' path must start and end with the same state (got '${first}' ... '${last}')`,
-        });
-      }
-
-      for (let i = 0; i < policy.path.length - 1; i++) {
-        const from = policy.path[i];
-        const to = policy.path[i + 1];
-        if (!from || !to) continue;
-        if (!edgeSet.has(`${from}->${to}`)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["cyclePolicies", idx, "path", i],
-            message: `Cycle policy '${policy.id}' step '${from} -> ${to}' is not a defined transition`,
-          });
-        }
-      }
-    });
+    const roleSet = validateRoles(config.roles, ctx);
+    validateStates(config.initialState, config.states, ctx);
+    const { edgeSet, outgoingByState } = validateTransitions(
+      config.transitions,
+      config.states,
+      roleSet,
+      ctx
+    );
+    validateReachability(config.initialState, config.states, outgoingByState, ctx);
+    validateCyclePolicies(config.cyclePolicies, edgeSet, ctx);
   });
-
-export type WorkflowConfig = z.infer<typeof WorkflowConfigSchema>;
 
 export class WorkflowConfigError extends Error {
   public readonly issues: readonly string[];

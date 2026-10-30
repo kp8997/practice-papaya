@@ -1,18 +1,12 @@
 import { cloneAndFreeze } from "../domain/freeze.js";
-import type { Claim, PreconditionCheckResult } from "../domain/types.js";
-import type { Condition, PreconditionConfig, ScopedPath } from "./config-schema.js";
-
-export interface RuleEvaluationContext {
-  readonly claim: Claim;
-  readonly input: Readonly<Record<string, unknown>>;
-  readonly effective: Readonly<Record<string, unknown>>;
-  readonly now: Date;
-}
-
-export interface ConditionEvaluationOutcome {
-  readonly passed: boolean;
-  readonly reason: string;
-}
+import type { PreconditionCheckResult } from "../domain/types.js";
+import type {
+  Condition,
+  ConditionEvaluationOutcome,
+  PreconditionConfig,
+  RuleEvaluationContext,
+  ScopedPath,
+} from "./types.js";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
@@ -280,4 +274,3 @@ export function evaluatePreconditions(
 
   return cloneAndFreeze(results);
 }
-

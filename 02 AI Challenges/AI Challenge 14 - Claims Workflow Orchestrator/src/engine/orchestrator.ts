@@ -14,29 +14,18 @@ import {
   type TransitionResult,
   type TransitionSuccess,
 } from "../domain/types.js";
-import {
-  AuditStore,
-  computeDataDelta,
-  replayClaimHistory,
-  type ReplayedClaimTrajectory,
-} from "./audit-store.js";
-import type { TransitionDefinition, WorkflowConfig } from "./config-schema.js";
+import { AuditStore, computeDataDelta, replayClaimHistory } from "./audit-store.js";
 import { evaluateCyclePolicy } from "./cycle-detector.js";
-import { OutboxStore, type OutboxDispatcher } from "./outbox-store.js";
-import { evaluatePreconditions, type RuleEvaluationContext } from "./rule-evaluator.js";
+import { OutboxStore } from "./outbox-store.js";
+import { evaluatePreconditions } from "./rule-evaluator.js";
 import { applySideEffectMutations, enqueueAndDispatchSideEffects } from "./side-effects.js";
-
-export interface WorkflowOrchestratorOptions {
-  readonly clock?: Clock;
-  readonly auditStore?: AuditStore;
-  readonly outboxStore?: OutboxStore;
-  readonly outboxDispatcher?: OutboxDispatcher;
-  /**
-   * When true (default), if a claim has an assigned `assessorId`, transitions requiring
-   * role `assessor` must be triggered by that assigned `assessorId` (`actor.userId === claim.data.assessorId`).
-   */
-  readonly enforceAssignedAssessor?: boolean;
-}
+import type {
+  ReplayedClaimTrajectory,
+  RuleEvaluationContext,
+  TransitionDefinition,
+  WorkflowConfig,
+  WorkflowOrchestratorOptions,
+} from "./types.js";
 
 /**
  * Merges incoming transition payload with existing claim data.
@@ -231,7 +220,6 @@ export class WorkflowOrchestrator {
    * Executes an atomic, validated state transition on a claim.
    */
   public transition(request: TransitionRequest): TransitionResult {
-    // 0. Idempotency check
     const idempotencyCacheKey =
       request.idempotencyKey !== undefined
         ? `${request.claimId}::${request.idempotencyKey}`
@@ -240,14 +228,10 @@ export class WorkflowOrchestrator {
     if (idempotencyCacheKey !== undefined) {
       const cached = this.#idempotencyCache.get(idempotencyCacheKey);
       if (cached !== undefined) {
-        return cloneAndFreeze({
-          ...cached,
-          idempotentReplay: true,
-        });
+        return cloneAndFreeze({ ...cached, idempotentReplay: true });
       }
     }
 
-    // 1. Claim existence check
     const claim = this.#claims.get(request.claimId);
     if (!claim) {
       return cloneAndFreeze({
@@ -262,7 +246,43 @@ export class WorkflowOrchestrator {
       });
     }
 
-    // 2. Optimistic concurrency check
+    const concurrencyFailure = this.#checkConcurrency(claim, request, idempotencyCacheKey);
+    if (concurrencyFailure) return concurrencyFailure;
+
+    const terminalFailure = this.#checkTerminalState(claim, request, idempotencyCacheKey);
+    if (terminalFailure) return terminalFailure;
+
+    const { transitionDef, failure: transitionFailure } = this.#lookupTransition(
+      claim,
+      request,
+      idempotencyCacheKey
+    );
+    if (transitionFailure || !transitionDef) return transitionFailure!;
+
+    const authFailure = this.#authorizeRole(claim, request, transitionDef, idempotencyCacheKey);
+    if (authFailure) return authFailure;
+
+    const cycleFailure = this.#checkCycleLimit(claim, request, idempotencyCacheKey);
+    if (cycleFailure) return cycleFailure;
+
+    const evalContext = this.#buildEvaluationContext(claim, request);
+    const preconditionFailure = this.#checkPreconditions(
+      claim,
+      request,
+      transitionDef,
+      evalContext,
+      idempotencyCacheKey
+    );
+    if (preconditionFailure) return preconditionFailure;
+
+    return this.#commitTransition(claim, request, transitionDef, evalContext, idempotencyCacheKey);
+  }
+
+  #checkConcurrency(
+    claim: Claim,
+    request: TransitionRequest,
+    idempotencyCacheKey?: string
+  ): TransitionFailure | null {
     if (request.expectedVersion !== undefined && request.expectedVersion !== claim.version) {
       return this.#recordFailure({
         claim,
@@ -272,8 +292,14 @@ export class WorkflowOrchestrator {
         idempotencyCacheKey,
       });
     }
+    return null;
+  }
 
-    // 3. Terminal state check
+  #checkTerminalState(
+    claim: Claim,
+    request: TransitionRequest,
+    idempotencyCacheKey?: string
+  ): TransitionFailure | null {
     const currentStateDef = this.#config.states[claim.state];
     if (currentStateDef?.terminal) {
       return this.#recordFailure({
@@ -284,12 +310,16 @@ export class WorkflowOrchestrator {
         idempotencyCacheKey,
       });
     }
+    return null;
+  }
 
-    // 4. Valid transition edge check
+  #lookupTransition(
+    claim: Claim,
+    request: TransitionRequest,
+    idempotencyCacheKey?: string
+  ): { transitionDef?: TransitionDefinition; failure?: TransitionFailure } {
     const outgoingTransitions = this.#config.transitions.filter((t) => t.from === claim.state);
-    const transitionDef: TransitionDefinition | undefined = outgoingTransitions.find(
-      (t) => t.to === request.toState
-    );
+    const transitionDef = outgoingTransitions.find((t) => t.to === request.toState);
 
     if (!transitionDef) {
       const allowedSummary = outgoingTransitions
@@ -300,20 +330,29 @@ export class WorkflowOrchestrator {
           ? ` ('${request.toState}' is not a defined workflow state)`
           : "";
 
-      return this.#recordFailure({
-        claim,
-        request,
-        code: "INVALID_TRANSITION",
-        message: `Transition '${claim.state} -> ${request.toState}' is not allowed for claim '${claim.id}'${unknownStateHint}. Allowed transitions from '${claim.state}': ${allowedSummary || "none"}`,
-        allowedTransitions: outgoingTransitions.map((t) => ({
-          to: t.to,
-          roles: [...t.roles],
-        })),
-        idempotencyCacheKey,
-      });
+      return {
+        failure: this.#recordFailure({
+          claim,
+          request,
+          code: "INVALID_TRANSITION",
+          message: `Transition '${claim.state} -> ${request.toState}' is not allowed for claim '${claim.id}'${unknownStateHint}. Allowed transitions from '${claim.state}': ${allowedSummary || "none"}`,
+          allowedTransitions: outgoingTransitions.map((t) => ({
+            to: t.to,
+            roles: [...t.roles],
+          })),
+          idempotencyCacheKey,
+        }),
+      };
     }
+    return { transitionDef };
+  }
 
-    // 5. Role & assigned-assessor authorization check
+  #authorizeRole(
+    claim: Claim,
+    request: TransitionRequest,
+    transitionDef: TransitionDefinition,
+    idempotencyCacheKey?: string
+  ): TransitionFailure | null {
     const isRoleDeclared = this.#config.roles.includes(request.actor.role);
     const isRoleAllowed = isRoleDeclared && transitionDef.roles.includes(request.actor.role);
     if (!isRoleAllowed) {
@@ -343,8 +382,14 @@ export class WorkflowOrchestrator {
         idempotencyCacheKey,
       });
     }
+    return null;
+  }
 
-    // 6. Cycle limit check (derived from AuditStore)
+  #checkCycleLimit(
+    claim: Claim,
+    request: TransitionRequest,
+    idempotencyCacheKey?: string
+  ): TransitionFailure | null {
     const claimAuditHistory = this.#auditStore.getByClaimId(claim.id);
     const cycleStatus = evaluateCyclePolicy(
       this.#config.cyclePolicies,
@@ -362,19 +407,28 @@ export class WorkflowOrchestrator {
         idempotencyCacheKey,
       });
     }
+    return null;
+  }
 
-    // 7. Precondition evaluation
+  #buildEvaluationContext(claim: Claim, request: TransitionRequest): RuleEvaluationContext {
     const now = this.#clock.now();
-    const nowIso = now.toISOString();
     const inputPayload = request.input ?? {};
     const effective = buildEffectiveData(claim.data, inputPayload);
-    const evalContext: RuleEvaluationContext = {
+    return {
       claim,
       input: inputPayload,
       effective,
       now,
     };
+  }
 
+  #checkPreconditions(
+    claim: Claim,
+    request: TransitionRequest,
+    transitionDef: TransitionDefinition,
+    evalContext: RuleEvaluationContext,
+    idempotencyCacheKey?: string
+  ): TransitionFailure | null {
     const preconditionResults = evaluatePreconditions(transitionDef.preconditions, evalContext);
     const failedPreconditions = preconditionResults
       .filter((r) => !r.passed)
@@ -390,8 +444,17 @@ export class WorkflowOrchestrator {
         idempotencyCacheKey,
       });
     }
+    return null;
+  }
 
-    // 8. Atomic state mutation, audit logging, and outbox dispatch
+  #commitTransition(
+    claim: Claim,
+    request: TransitionRequest,
+    transitionDef: TransitionDefinition,
+    evalContext: RuleEvaluationContext,
+    idempotencyCacheKey?: string
+  ): TransitionSuccess {
+    const nowIso = evalContext.now.toISOString();
     const { nextData, plans } = applySideEffectMutations(
       transitionDef.sideEffects,
       evalContext,
@@ -517,4 +580,3 @@ export class WorkflowOrchestrator {
     return failureResult;
   }
 }
-

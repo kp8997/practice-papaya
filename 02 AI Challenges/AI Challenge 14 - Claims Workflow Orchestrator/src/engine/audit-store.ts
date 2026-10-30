@@ -1,40 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
 import { cloneAndFreeze, deepFreeze } from "../domain/freeze.js";
-import type { WorkflowErrorCode } from "../domain/errors.js";
 import type {
   Actor,
   AuditDelta,
   AuditEntry,
   AuditFieldChange,
-  AuditOutcome,
-  ClaimData,
-  ExecutedSideEffect,
 } from "../domain/types.js";
-
-export interface AppendAuditInput {
-  readonly id?: string;
-  readonly claimId: string;
-  readonly timestamp: string;
-  readonly fromState: string | null;
-  readonly toState: string;
-  readonly triggeredBy: Actor;
-  readonly notes: string;
-  readonly outcome: AuditOutcome;
-  readonly errorCode?: WorkflowErrorCode;
-  readonly workflowVersion: string;
-  readonly claimVersion: number;
-  readonly delta?: AuditDelta;
-  readonly sideEffects?: readonly ExecutedSideEffect[];
-}
-
-export interface ReplayedClaimTrajectory {
-  readonly claimId: string;
-  readonly currentState: string | null;
-  readonly version: number;
-  readonly stateHistory: readonly string[];
-  readonly deniedAttempts: number;
-  readonly data: ClaimData;
-}
+import type { AppendAuditInput, ReplayedClaimTrajectory } from "./types.js";
 
 /**
  * Computes field-by-field `{ before, after }` deltas between two claim data snapshots.
@@ -159,4 +131,3 @@ export function replayClaimHistory(
     data,
   });
 }
-

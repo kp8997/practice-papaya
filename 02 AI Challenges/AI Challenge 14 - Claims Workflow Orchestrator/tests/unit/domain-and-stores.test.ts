@@ -12,8 +12,8 @@ import {
   evaluateCondition,
   evaluatePreconditions,
   resolveScopedPath,
-  type RuleEvaluationContext,
 } from "../../src/engine/rule-evaluator.js";
+import type { RuleEvaluationContext } from "../../src/engine/types.js";
 
 function makeSampleClaim(overrides: Partial<Claim> = {}): Claim {
   return cloneAndFreeze({
