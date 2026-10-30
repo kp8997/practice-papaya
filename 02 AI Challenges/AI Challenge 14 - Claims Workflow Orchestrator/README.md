@@ -243,7 +243,7 @@ Full test execution logs are preserved in [`docs/test-results.txt`](docs/test-re
 - [x] **Postman API Collection**: [`docs/claims-workflow-orchestrator.postman_collection.json`](docs/claims-workflow-orchestrator.postman_collection.json)
 - [x] **Postman Environment**: [`docs/claims-workflow-local.postman_environment.json`](docs/claims-workflow-local.postman_environment.json)
 - [x] **Comprehensive Documentation**: `README.md`
-- [ ] **Raw AI Conversation Export**: `AI_CONVERSATION.md` *(To be generated as the final command after manual user testing)*
+- [x] **Raw AI Conversation Export**: [`AI_CONVERSATION.md`](docs/AI_CONVERSATION.md) (Verbatim dialogue, thoughts, and tool executions)
 
 ---
 
