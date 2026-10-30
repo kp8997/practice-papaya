@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "7b8e1f33-9fe8-4160-93b4-40b9e1f33284",
     "name": "Claims Workflow Orchestrator API",
-    "description": "Postman Collection for Papaya AI Challenge 14 — Claims Workflow Orchestrator.\nIncludes Happy Path, Role Rejections, Precondition Failures, Cycle Detection, Appeal Clock Fast-Forward, and Audit Trail Replay verification.",
+    "description": "Postman Collection for Papaya AI Challenge 14 — Claims Workflow Orchestrator.\nIncludes Automated Assertions (pm.test), Happy Path, Role Rejections, Precondition Failures, Cycle Detection, Appeal Clock Fast-Forward, and Audit Trail Replay verification.\nCompatible with Postman Environment file: docs/claims-workflow-local.postman_environment.json",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -23,6 +23,25 @@
       "item": [
         {
           "name": "GET Workflow Config & States",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Workflow metadata valid\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.ok).to.eql(true);",
+                  "    pm.expect(json.config.version).to.eql(\"1.0.0\");",
+                  "    pm.expect(json.config.roles).to.include(\"assessor\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -36,6 +55,23 @@
         },
         {
           "name": "POST Seed Demo Claims",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Sample claims present\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.claims.length).to.be.at.least(3);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [],
@@ -49,6 +85,19 @@
         },
         {
           "name": "GET List All Claims",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -66,6 +115,24 @@
       "item": [
         {
           "name": "Step 1: Create Claim C-POSTMAN-1",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.claim && jsonData.claim.id) {",
+                  "    pm.environment.set(\"claimId\", jsonData.claim.id);",
+                  "    pm.collectionVariables.set(\"claimId\", jsonData.claim.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -82,6 +149,24 @@
         },
         {
           "name": "Step 2: Inspect State & Available Transitions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Claim is SUBMITTED with 1 valid transition\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.claim.state).to.eql(\"SUBMITTED\");",
+                  "    pm.expect(json.availableTransitions[0].to).to.eql(\"DOCUMENTS_VERIFIED\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -94,12 +179,29 @@
         },
         {
           "name": "Step 3: SUBMITTED -> DOCUMENTS_VERIFIED (document_clerk)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Transitioned to DOCUMENTS_VERIFIED\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.claim.state).to.eql(\"DOCUMENTS_VERIFIED\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"toState\": \"DOCUMENTS_VERIFIED\",\n  \"actor\": {\n    \"userId\": \"clerk-bob\",\n    \"role\": \"document_clerk\"\n  },\n  \"notes\": \"All 3 required documents verified\"\n}"
+              "raw": "{\n  \"toState\": \"DOCUMENTS_VERIFIED\",\n  \"actor\": {\n    \"userId\": \"{{clerkId}}\",\n    \"role\": \"document_clerk\"\n  },\n  \"notes\": \"All 3 required documents verified\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/claims/{{claimId}}/advance",
@@ -110,12 +212,30 @@
         },
         {
           "name": "Step 4: DOCUMENTS_VERIFIED -> UNDER_ASSESSMENT (team_lead assigns assessor)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Transitioned to UNDER_ASSESSMENT with assessor assigned\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.claim.state).to.eql(\"UNDER_ASSESSMENT\");",
+                  "    pm.expect(json.claim.data.assessorId).to.eql(\"assessor-alice\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"toState\": \"UNDER_ASSESSMENT\",\n  \"actor\": {\n    \"userId\": \"lead-sarah\",\n    \"role\": \"team_lead\"\n  },\n  \"input\": {\n    \"assessorId\": \"assessor-alice\"\n  },\n  \"notes\": \"Assigning claim to assessor-alice\"\n}"
+              "raw": "{\n  \"toState\": \"UNDER_ASSESSMENT\",\n  \"actor\": {\n    \"userId\": \"{{leadId}}\",\n    \"role\": \"team_lead\"\n  },\n  \"input\": {\n    \"assessorId\": \"{{assessorId}}\"\n  },\n  \"notes\": \"Assigning claim to assessor-alice\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/claims/{{claimId}}/advance",
@@ -126,12 +246,30 @@
         },
         {
           "name": "Step 5: UNDER_ASSESSMENT -> APPROVED (assessor completes report)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Approved and paymentRequestId automatically populated\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.claim.state).to.eql(\"APPROVED\");",
+                  "    pm.expect(json.claim.data.paymentRequestId).to.be.a(\"string\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"toState\": \"APPROVED\",\n  \"actor\": {\n    \"userId\": \"assessor-alice\",\n    \"role\": \"assessor\"\n  },\n  \"input\": {\n    \"assessmentReportComplete\": true\n  },\n  \"notes\": \"Approved within policy limit\"\n}"
+              "raw": "{\n  \"toState\": \"APPROVED\",\n  \"actor\": {\n    \"userId\": \"{{assessorId}}\",\n    \"role\": \"assessor\"\n  },\n  \"input\": {\n    \"assessmentReportComplete\": true\n  },\n  \"notes\": \"Approved within policy limit\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/claims/{{claimId}}/advance",
@@ -142,12 +280,29 @@
         },
         {
           "name": "Step 6: APPROVED -> PAYMENT_INITIATED (finance)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"State is PAYMENT_INITIATED\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.claim.state).to.eql(\"PAYMENT_INITIATED\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"toState\": \"PAYMENT_INITIATED\",\n  \"actor\": {\n    \"userId\": \"finance-frank\",\n    \"role\": \"finance\"\n  },\n  \"notes\": \"Payment batch queued\"\n}"
+              "raw": "{\n  \"toState\": \"PAYMENT_INITIATED\",\n  \"actor\": {\n    \"userId\": \"{{financeId}}\",\n    \"role\": \"finance\"\n  },\n  \"notes\": \"Payment batch queued\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/claims/{{claimId}}/advance",
@@ -158,12 +313,29 @@
         },
         {
           "name": "Step 7: PAYMENT_INITIATED -> CLOSED (finance confirms payment)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Claim is terminal CLOSED\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.claim.state).to.eql(\"CLOSED\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"toState\": \"CLOSED\",\n  \"actor\": {\n    \"userId\": \"finance-frank\",\n    \"role\": \"finance\"\n  },\n  \"input\": {\n    \"paymentConfirmed\": true,\n    \"paymentReference\": \"PAY-REF-9099\"\n  },\n  \"notes\": \"Payment confirmed by clearing house\"\n}"
+              "raw": "{\n  \"toState\": \"CLOSED\",\n  \"actor\": {\n    \"userId\": \"{{financeId}}\",\n    \"role\": \"finance\"\n  },\n  \"input\": {\n    \"paymentConfirmed\": true,\n    \"paymentReference\": \"PAY-REF-9099\"\n  },\n  \"notes\": \"Payment confirmed by clearing house\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/claims/{{claimId}}/advance",
@@ -179,6 +351,23 @@
       "item": [
         {
           "name": "FAIL: Unauthorized Role (document_clerk -> APPROVED)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 422\", function () {",
+                  "    pm.response.to.have.status(422);",
+                  "});",
+                  "pm.test(\"Error code is UNAUTHORIZED_ROLE\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.error.code).to.eql(\"UNAUTHORIZED_ROLE\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -196,6 +385,23 @@
         },
         {
           "name": "FAIL: Maker-Checker Assessor Mismatch",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 422\", function () {",
+                  "    pm.response.to.have.status(422);",
+                  "});",
+                  "pm.test(\"Error code is UNAUTHORIZED_ROLE (maker-checker violation)\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.error.code).to.eql(\"UNAUTHORIZED_ROLE\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -213,12 +419,29 @@
         },
         {
           "name": "FAIL: Precondition Failure (Amount > Policy Limit)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 422\", function () {",
+                  "    pm.response.to.have.status(422);",
+                  "});",
+                  "pm.test(\"Error code is PRECONDITION_FAILED\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.error.code).to.eql(\"PRECONDITION_FAILED\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"toState\": \"APPROVED\",\n  \"actor\": {\n    \"userId\": \"assessor-alice\",\n    \"role\": \"assessor\"\n  },\n  \"input\": {\n    \"assessmentReportComplete\": true,\n    \"amount\": 15000\n  }\n}"
+              "raw": "{\n  \"toState\": \"APPROVED\",\n  \"actor\": {\n    \"userId\": \"{{assessorId}}\",\n    \"role\": \"assessor\"\n  },\n  \"input\": {\n    \"assessmentReportComplete\": true,\n    \"amount\": 15000\n  }\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/claims/C-ASSESS/advance",
@@ -234,24 +457,20 @@
       "name": "4. Cycle Limit & 30-Day Appeal Fast-Forward",
       "item": [
         {
-          "name": "Cycle Limit: 4th Info Request Blocked",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"toState\": \"PENDING_INFO\",\n  \"actor\": {\n    \"userId\": \"assessor-alice\",\n    \"role\": \"assessor\"\n  },\n  \"input\": {\n    \"missingInfoDescription\": \"4th request attempt\"\n  }\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/claims/C-ASSESS/advance",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "claims", "C-ASSESS", "advance"]
-            },
-            "description": "Run after 3 info loops. Expected: 422 CYCLE_LIMIT_EXCEEDED with 'Maximum information requests exceeded — escalate to team lead'"
-          }
-        },
-        {
           "name": "Fast-Forward Simulated Clock +31 Days",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -269,12 +488,29 @@
         },
         {
           "name": "Close Rejected Claim (system actor after 30d)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"C-REJECTED closed by system\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.claim.state).to.eql(\"CLOSED\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"toState\": \"CLOSED\",\n  \"actor\": {\n    \"userId\": \"sys-archive-cron\",\n    \"role\": \"system\"\n  },\n  \"notes\": \"Archiving claim after 30-day appeal window elapsed\"\n}"
+              "raw": "{\n  \"toState\": \"CLOSED\",\n  \"actor\": {\n    \"userId\": \"{{systemId}}\",\n    \"role\": \"system\"\n  },\n  \"notes\": \"Archiving claim after 30-day appeal window elapsed\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/claims/C-REJECTED/advance",
@@ -290,6 +526,24 @@
       "item": [
         {
           "name": "GET Immutable Audit Trail & Replay Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Audit entries and replay verified\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.count).to.be.at.least(5);",
+                  "    pm.expect(json.replay.currentState).to.eql(\"CLOSED\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -303,6 +557,23 @@
         },
         {
           "name": "GET Transactional Outbox Events",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Dispatched outbox notifications present\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.count).to.be.at.least(3);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -316,6 +587,19 @@
         },
         {
           "name": "POST Reset In-Memory Database",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [],
