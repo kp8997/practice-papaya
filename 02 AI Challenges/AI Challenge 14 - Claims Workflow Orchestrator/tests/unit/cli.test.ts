@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CliSession, tokenizeCommand } from "../../src/cli/repl.js";
+import { CliSession } from "../../src/cli/repl.js";
+import { tokenizeCommand } from '../../src/cli/parser.js'
 import { executeAllScenarios, renderScenariosMarkdown } from "../../scripts/scenarios/index.js";
 
 describe("Phase 5 — Interactive CLI & Scenario Runner", () => {
@@ -85,4 +86,3 @@ describe("Phase 5 — Interactive CLI & Scenario Runner", () => {
     expect(md).toContain("Maximum information requests exceeded — escalate to team lead");
   });
 });
-

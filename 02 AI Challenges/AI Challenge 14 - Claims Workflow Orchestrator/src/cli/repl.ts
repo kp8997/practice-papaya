@@ -9,9 +9,6 @@ import { buildCliProgram } from "./commands.js";
 import { tokenizeCommand } from "./parser.js";
 import type { CommandExecutionOutput } from "./types.js";
 
-export { tokenizeCommand } from "./parser.js";
-export type { CommandExecutionOutput } from "./types.js";
-
 /**
  * Starts the interactive readline REPL loop.
  */
