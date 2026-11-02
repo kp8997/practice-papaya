@@ -103,11 +103,15 @@ transitions:
     roles:
       - fraud_analyst
     preconditions:
-      - description: High fraud risk score (> 70)
+      - description: High fraud risk score (> 70 and <= 100)
         check:
-          op: gt
-          path: effective.fraudRiskScore
-          value: 70
+          all_of:
+            - op: gt
+              path: effective.fraudRiskScore
+              value: 70
+            - op: lte
+              path: effective.fraudRiskScore
+              value: 100
       - description: Rejection reason provided
         check:
           op: not_empty

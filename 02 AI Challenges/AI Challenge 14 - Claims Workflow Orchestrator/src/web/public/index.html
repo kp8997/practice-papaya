@@ -95,10 +95,10 @@
         <button class="btn btn-sm" onclick="toggleModal(false)">X</button>
       </div>
       <form onsubmit="handleCreateSubmit(event)" style="display: flex; flex-direction: column; gap: 10px;">
-        <div class="form-group"><label>Claim ID (optional)</label><input id="new-id" class="form-control" placeholder="e.g. C-101"></div>
+        <div class="form-group"><label>Claim ID (optional)</label><input id="new-id" class="form-control" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._:-]*" placeholder="e.g. C-101"></div>
         <div class="form-row">
-          <div class="form-group"><label>Claim Amount ($)</label><input type="number" id="new-amount" class="form-control" value="6500" required></div>
-          <div class="form-group"><label>Policy Limit ($)</label><input type="number" id="new-limit" class="form-control" value="10000" required></div>
+          <div class="form-group"><label>Claim Amount ($)</label><input type="number" id="new-amount" class="form-control" value="6500" min="0.01" max="1000000000" step="any" required></div>
+          <div class="form-group"><label>Policy Limit ($)</label><input type="number" id="new-limit" class="form-control" value="10000" min="0.01" max="1000000000" step="any" required></div>
         </div>
         <div class="form-group">
           <label>Included Documents</label>

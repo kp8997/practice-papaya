@@ -72,6 +72,57 @@ describe("Phase 5 — Interactive CLI & Scenario Runner", () => {
     expect(session.executeCommand("exit").shouldExit).toBe(true);
   });
 
+  it("formats audit output with structured tree layout, line-by-line delta changes, and supports outcome/limit/color filtering", () => {
+    const session = new CliSession();
+    session.executeCommand("create --id C-TREE --amount 5000");
+
+    // Denied attempt: unauthorized role from SUBMITTED
+    const deniedStep = session.executeCommand(
+      "advance C-TREE DOCUMENTS_VERIFIED --role assessor --user assessor-1"
+    );
+    expect(deniedStep.output).toContain("[REJECTED — UNAUTHORIZED_ROLE]");
+
+    // Successful attempt
+    const successStep = session.executeCommand(
+      'advance C-TREE DOCUMENTS_VERIFIED --role document_clerk --user clerk-1 --notes "All clear"'
+    );
+    expect(successStep.output).toContain("[OK] SUBMITTED -> DOCUMENTS_VERIFIED");
+
+    // Full audit trail
+    const auditFull = session.executeCommand("audit C-TREE");
+    expect(auditFull.output).toContain("Immutable Audit Trail for C-TREE (3 entries)");
+    expect(auditFull.output).toContain("│ Actor  : assessor-1 (assessor)");
+    expect(auditFull.output).toContain("│ Actor  : clerk-1 (document_clerk)");
+    expect(auditFull.output).toContain("[DENIED: UNAUTHORIZED_ROLE]");
+    expect(auditFull.output).toContain("[SUCCESS · v2]");
+    expect(auditFull.output).toContain("└ Delta  :");
+    expect(auditFull.output).toContain("+ amount");
+
+    // Filter by outcome: denied only
+    const auditDenied = session.executeCommand("audit C-TREE --outcome denied");
+    expect(auditDenied.output).toContain("[DENIED: UNAUTHORIZED_ROLE]");
+    expect(auditDenied.output).not.toContain("[SUCCESS · v2]");
+    expect(auditDenied.output).toContain("showing 1");
+
+    // Filter by outcome: success only
+    const auditSuccess = session.executeCommand("audit C-TREE --outcome success");
+    expect(auditSuccess.output).toContain("[SUCCESS · v1]");
+    expect(auditSuccess.output).toContain("[SUCCESS · v2]");
+    expect(auditSuccess.output).not.toContain("[DENIED: UNAUTHORIZED_ROLE]");
+
+    // Limit to latest 1 entry
+    const auditLimit = session.executeCommand("audit C-TREE -n 1");
+    expect(auditLimit.output).toContain("AUD-0003");
+    expect(auditLimit.output).not.toContain("AUD-0001");
+
+    // Color flags
+    const auditColor = session.executeCommand("audit C-TREE --color");
+    expect(auditColor.output).toContain("\x1b[");
+
+    const auditNoColor = session.executeCommand("audit C-TREE --no-color");
+    expect(auditNoColor.output).not.toContain("\x1b[");
+  });
+
   it("executes all 7 scenarios and renders complete Markdown report with audit trails", () => {
     const summaries = executeAllScenarios();
     expect(summaries).toHaveLength(7);

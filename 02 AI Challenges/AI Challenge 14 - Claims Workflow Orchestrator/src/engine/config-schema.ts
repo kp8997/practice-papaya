@@ -16,7 +16,7 @@ export const ScopedPathSchema = z
     "Path must start with 'claim.', 'input.', or 'effective.' followed by a valid property path"
   );
 
-const PrimitiveValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const PrimitiveValueSchema = z.union([z.string(), z.number().finite(), z.boolean(), z.null()]);
 
 const LeafConditionSchema: z.ZodType<LeafCondition> = z.discriminatedUnion("op", [
   z.object({ op: z.literal("present"), path: ScopedPathSchema }).strict(),
@@ -28,9 +28,9 @@ const LeafConditionSchema: z.ZodType<LeafCondition> = z.discriminatedUnion("op",
       value: PrimitiveValueSchema,
     })
     .strict(),
-  z.object({ op: z.literal("gt"), path: ScopedPathSchema, value: z.number() }).strict(),
-  z.object({ op: z.literal("gte"), path: ScopedPathSchema, value: z.number() }).strict(),
-  z.object({ op: z.literal("lte"), path: ScopedPathSchema, value: z.number() }).strict(),
+  z.object({ op: z.literal("gt"), path: ScopedPathSchema, value: z.number().finite() }).strict(),
+  z.object({ op: z.literal("gte"), path: ScopedPathSchema, value: z.number().finite() }).strict(),
+  z.object({ op: z.literal("lte"), path: ScopedPathSchema, value: z.number().finite() }).strict(),
   z
     .object({
       op: z.literal("lte_path"),
@@ -48,7 +48,7 @@ const LeafConditionSchema: z.ZodType<LeafCondition> = z.discriminatedUnion("op",
   z
     .object({
       op: z.literal("days_in_state_gte"),
-      days: z.number().positive("days must be > 0"),
+      days: z.number().finite().positive("days must be > 0"),
     })
     .strict(),
 ]);

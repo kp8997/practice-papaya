@@ -6,11 +6,11 @@ let selectedClaimDetail = null;
 // Declarative transition input schemas (Open/Closed: add new state inputs here)
 const TRANSITION_FIELDS = {
   "FRAUD_CHECK->UNDER_ASSESSMENT": [
-    { key: "fraudRiskScore", label: "Fraud Risk Score (0-70)", type: "number", defaultVal: 15 },
+    { key: "fraudRiskScore", label: "Fraud Risk Score (0-70)", type: "number", min: 0, max: 100, defaultVal: 15 },
     { key: "assessorId", label: "Assign Assessor ID", type: "text", defaultVal: "assessor-alice" },
   ],
   "FRAUD_CHECK->REJECTED": [
-    { key: "fraudRiskScore", label: "Fraud Risk Score (>70)", type: "number", defaultVal: 88 },
+    { key: "fraudRiskScore", label: "Fraud Risk Score (71-100)", type: "number", min: 0, max: 100, defaultVal: 88 },
     { key: "rejectionReason", label: "Fraud Rejection Reason", type: "text", defaultVal: "Duplicate invoice detected" },
   ],
   UNDER_ASSESSMENT: [
@@ -176,7 +176,7 @@ function renderWorkbench() {
       const fields = getFieldsForEdge(claim.state, t.to);
       const inputsHtml = fields.map((f) => f.type === "checkbox"
         ? `<label style="font-size:0.8rem;"><input type="checkbox" id="f-${t.to}-${f.key}" ${f.defaultVal ? "checked" : ""}> ${f.label}</label>`
-        : `<div class="form-group"><label>${f.label}</label><input type="${f.type === "number" ? "number" : "text"}" id="f-${t.to}-${f.key}" class="form-control" value="${claim.data?.[f.key] ?? f.defaultVal}"></div>`
+        : `<div class="form-group"><label>${f.label}</label><input type="${f.type === "number" ? "number" : "text"}" id="f-${t.to}-${f.key}" class="form-control" ${f.min !== undefined ? `min="${f.min}"` : ""} ${f.max !== undefined ? `max="${f.max}"` : ""} value="${claim.data?.[f.key] ?? f.defaultVal}"></div>`
       ).join("");
 
       return `
@@ -206,9 +206,14 @@ async function executeTransition(toState) {
     if (!el) continue;
     if (f.type === "checkbox") {
       if (f.key !== "memberAcknowledged" || el.checked) input[f.key] = el.checked;
-    } else if (f.type === "number") input[f.key] = Number(el.value);
-    else if (f.type === "array") input[f.key] = el.value.split(",").map((s) => s.trim()).filter(Boolean);
-    else input[f.key] = el.value;
+    } else if (f.type === "number") {
+      if (el.value.trim() !== "") input[f.key] = Number(el.value);
+    } else if (f.type === "array") {
+      const items = el.value.split(",").map((s) => s.trim()).filter(Boolean);
+      if (items.length > 0) input[f.key] = items;
+    } else if (el.value.trim() !== "") {
+      input[f.key] = el.value.trim();
+    }
   }
 
   const json = await api(`/api/claims/${encodeURIComponent(selectedClaimId)}/advance`, "POST", {
@@ -250,12 +255,24 @@ function renderOutbox(outbox) {
 
 async function handleCreateSubmit(e) {
   e.preventDefault();
+  const rawAmount = $("new-amount").value.trim();
+  const rawLimit = $("new-limit").value.trim();
+  const amount = Number(rawAmount);
+  const policyLimit = Number(rawLimit);
+  if (!rawAmount || !Number.isFinite(amount) || amount <= 0) {
+    showToast("Claim amount must be a positive number greater than 0.", true);
+    return;
+  }
+  if (!rawLimit || !Number.isFinite(policyLimit) || policyLimit <= 0) {
+    showToast("Policy limit must be a positive number greater than 0.", true);
+    return;
+  }
   const docs = [["doc-form", "claim_form"], ["doc-report", "medical_report"], ["doc-receipt", "itemized_receipt"]]
     .filter(([id]) => $(id).checked).map(([, name]) => name);
   const json = await api("/api/claims", "POST", {
     id: $("new-id").value.trim() || undefined,
     notes: $("new-notes").value.trim() || undefined,
-    data: { amount: Number($("new-amount").value), policyLimit: Number($("new-limit").value), submittedDocuments: docs },
+    data: { amount, policyLimit, submittedDocuments: docs },
   });
   if (json.ok) {
     toggleModal(false);

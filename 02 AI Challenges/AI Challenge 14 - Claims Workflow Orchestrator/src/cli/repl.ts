@@ -3,10 +3,12 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { CommanderError } from "commander";
 import { ClaimsSession, DEFAULT_CONFIG_PATH, resolveConfigPathFromArgv } from "../app/claims-session.js";
+import { ClaimValidationError } from "../domain/validation.js";
 import type { WorkflowOrchestrator } from "../engine/orchestrator.js";
 import type { WorkflowConfig } from "../engine/types.js";
 import { buildCliProgram } from "./commands.js";
 import { tokenizeCommand } from "./parser.js";
+import { isColorSupported, paint } from "./theme.js";
 import type { CommandExecutionOutput } from "./types.js";
 
 /**
@@ -36,12 +38,18 @@ export function startInteractiveRepl(configPath = DEFAULT_CONFIG_PATH): void {
  */
 export class CliSession {
   readonly #session: ClaimsSession;
+  readonly #color: boolean;
 
-  constructor(configPath = DEFAULT_CONFIG_PATH, initialClockIso?: string) {
+  constructor(
+    configPath = DEFAULT_CONFIG_PATH,
+    initialClockIso?: string,
+    color = isColorSupported()
+  ) {
     this.#session = new ClaimsSession({
       configPath,
       ...(initialClockIso !== undefined ? { initialClockIso } : {}),
     });
+    this.#color = color;
   }
 
   public getOrchestrator(): WorkflowOrchestrator {
@@ -62,12 +70,15 @@ export class CliSession {
     }
 
     const chunks: string[] = [];
-    const program = buildCliProgram(this.#session, (text) => chunks.push(text.trimEnd()));
+    const program = buildCliProgram(this.#session, (text) => chunks.push(text.trimEnd()), this.#color);
 
     try {
       program.parse([head, ...tokens.slice(1)], { from: "user" });
     } catch (err) {
-      if (!(err instanceof CommanderError)) {
+      if (err instanceof ClaimValidationError) {
+        const badge = paint(`[REJECTED — ${err.code}]`, ["bold", "red"], this.#color);
+        chunks.push(`${badge} ${err.message}`);
+      } else if (!(err instanceof CommanderError)) {
         chunks.push(`[CLI ERROR] ${err instanceof Error ? err.message : String(err)}`);
       }
     }

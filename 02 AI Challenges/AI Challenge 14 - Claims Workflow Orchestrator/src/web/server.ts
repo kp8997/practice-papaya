@@ -5,6 +5,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { ClaimsSession, resolveConfigPathFromArgv } from "../app/claims-session.js";
+import { ClaimValidationError } from "../domain/validation.js";
 import { createClaimsRoutes } from "./routes/claims.routes.js";
 import { createSystemRoutes } from "./routes/system.routes.js";
 import type { WebServerInstance, WebServerOptions, WorkflowWebApp } from "./types.js";
@@ -50,9 +51,23 @@ export function createWorkflowApp(options: WebServerOptions = {}): WorkflowWebAp
     )
   );
 
-  app.onError((err, c) =>
-    c.json({ ok: false, error: { code: "INTERNAL_SERVER_ERROR", message: err.message } }, 500)
-  );
+  app.onError((err, c) => {
+    if (err instanceof ClaimValidationError) {
+      const status = err.code === "DUPLICATE_CLAIM" ? 409 : 400;
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: err.code === "DUPLICATE_CLAIM" ? "DUPLICATE_CLAIM" : "INVALID_CLAIM_DATA",
+            message: err.message,
+            issues: err.issues,
+          },
+        },
+        status
+      );
+    }
+    return c.json({ ok: false, error: { code: "INTERNAL_SERVER_ERROR", message: err.message } }, 500);
+  });
 
   return { app, session };
 }

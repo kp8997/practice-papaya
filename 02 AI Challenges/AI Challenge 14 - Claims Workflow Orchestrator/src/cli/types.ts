@@ -21,3 +21,13 @@ export interface AdvanceCmdOptions {
   readonly set?: string[];
   readonly json?: string;
 }
+
+export interface AuditCmdOptions {
+  readonly outcome?: string | undefined;
+  readonly limit?: string | undefined;
+  readonly color?: boolean | undefined;
+}
+
+export interface FormatterOptions {
+  readonly color?: boolean | undefined;
+}

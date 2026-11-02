@@ -1,6 +1,13 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Claim, OutboxEvent, TransitionResult } from "../domain/types.js";
+import {
+  ClaimValidationError,
+  isPlainObject,
+  validateClaimDataPayload,
+  validateClockAdvanceDelta,
+  validateClockIso,
+} from "../domain/validation.js";
 import { loadWorkflowConfig } from "../engine/config-schema.js";
 import { WorkflowOrchestrator } from "../engine/orchestrator.js";
 import type { WorkflowConfig } from "../engine/types.js";
@@ -41,7 +48,7 @@ export class ClaimsSession {
 
   constructor(options: SessionOptions = {}) {
     this.#configPath = options.configPath ?? DEFAULT_CONFIG_PATH;
-    this.#clockMs = Date.parse(options.initialClockIso ?? DEFAULT_CLOCK_ISO);
+    this.#clockMs = validateClockIso(options.initialClockIso ?? DEFAULT_CLOCK_ISO);
     this.#orchestrator = this.#buildOrchestrator();
   }
 
@@ -72,10 +79,8 @@ export class ClaimsSession {
   }
 
   public advanceClock(delta: ClockAdvanceInput): ClockSnapshot {
-    const daysMs = (delta.days ?? 0) * 24 * 60 * 60 * 1000;
-    const hoursMs = (delta.hours ?? 0) * 60 * 60 * 1000;
-    const minutesMs = (delta.minutes ?? 0) * 60 * 1000;
-    this.#clockMs += daysMs + hoursMs + minutesMs;
+    const deltaMs = validateClockAdvanceDelta(delta, false);
+    this.#clockMs += deltaMs;
     return this.getClock();
   }
 
@@ -97,6 +102,25 @@ export class ClaimsSession {
   }
 
   public createClaim(input: CreateClaimSessionInput = {}): ClaimDetailView {
+    const rawInput: unknown = input;
+    if (!isPlainObject(rawInput)) {
+      throw new ClaimValidationError("'input' must be a plain object", "INVALID_CLAIM_DATA");
+    }
+    if (input.extraData !== undefined && !isPlainObject(input.extraData as unknown)) {
+      throw new ClaimValidationError("'data' must be a plain object", "INVALID_CLAIM_DATA");
+    }
+
+    // Validate explicit top-level numeric/doc fields before merging extraData so invalid options are never masked
+    const explicitFields: Record<string, unknown> = {
+      ...(input.amount !== undefined ? { amount: input.amount } : {}),
+      ...(input.policyLimit !== undefined ? { policyLimit: input.policyLimit } : {}),
+      ...(input.submittedDocuments !== undefined ? { submittedDocuments: input.submittedDocuments } : {}),
+    };
+    const explicitIssues = validateClaimDataPayload(explicitFields, "input");
+    if (explicitIssues.length > 0) {
+      throw new ClaimValidationError(explicitIssues, "INVALID_CLAIM_DATA");
+    }
+
     const defaultDocs = this.#orchestrator.getConfig().defaults.requiredDocuments;
     const claim = this.#orchestrator.createClaim({
       ...(input.id !== undefined ? { id: input.id } : {}),

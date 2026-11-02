@@ -1,6 +1,16 @@
 import { createWorkflowError, type WorkflowErrorCode } from "../domain/errors.js";
 import { cloneAndFreeze, deepFreeze } from "../domain/freeze.js";
 import {
+  ClaimValidationError,
+  isPlainObject,
+  validateActorInput,
+  validateClaimDataPayload,
+  validateClaimId,
+  validateExpectedVersionInput,
+  validateIdempotencyKeyInput,
+  validateNotesInput,
+} from "../domain/validation.js";
+import {
   SystemClock,
   type Actor,
   type AuditEntry,
@@ -89,20 +99,55 @@ export class WorkflowOrchestrator {
    * Creates a new claim in the configured `initialState` and logs the initial audit entry.
    */
   public createClaim(input: CreateClaimInput = {}): Claim {
-    this.#claimSequence += 1;
-    const id = input.id ?? `C-${this.#claimSequence}`;
-    if (this.#claims.has(id)) {
-      throw new Error(`Claim '${id}' already exists`);
+    const rawInput: unknown = input;
+    if (!isPlainObject(rawInput)) {
+      throw new ClaimValidationError("'input' must be a plain object", "INVALID_CLAIM_DATA");
     }
 
-    const nowIso = this.#clock.now().toISOString();
+    const issues: string[] = [];
+    if (input.id !== undefined) {
+      const idErr = validateClaimId(input.id, "id");
+      if (idErr) issues.push(idErr);
+    }
+
+    const actorCandidate: unknown = input.actor ?? { userId: "system", role: "system" };
+    issues.push(...validateActorInput(actorCandidate));
+
+    const notesErr = validateNotesInput(input.notes);
+    if (notesErr) issues.push(notesErr);
+
+    const rawData: unknown = input.data;
+    if (rawData !== undefined && !isPlainObject(rawData)) {
+      issues.push("'data' must be a plain object");
+    }
+
     const initialData: Record<string, unknown> = {
       ...(this.#config.defaults.requiredDocuments.length > 0
         ? { requiredDocuments: [...this.#config.defaults.requiredDocuments] }
         : {}),
-      ...(input.data ? structuredClone(input.data) : {}),
+      ...(isPlainObject(rawData) ? structuredClone(rawData) : {}),
     };
+    issues.push(...validateClaimDataPayload(initialData, "data"));
 
+    if (issues.length > 0) {
+      throw new ClaimValidationError(issues, "INVALID_CLAIM_DATA");
+    }
+
+    const actor = actorCandidate as Actor;
+
+    if (input.id !== undefined && this.#claims.has(input.id)) {
+      throw new ClaimValidationError(`Claim '${input.id}' already exists`, "DUPLICATE_CLAIM");
+    }
+
+    let id = input.id;
+    if (id === undefined) {
+      do {
+        this.#claimSequence += 1;
+        id = `C-${this.#claimSequence}`;
+      } while (this.#claims.has(id));
+    }
+
+    const nowIso = this.#clock.now().toISOString();
     const claim: Claim = cloneAndFreeze({
       id,
       state: this.#config.initialState,
@@ -114,7 +159,10 @@ export class WorkflowOrchestrator {
       data: initialData,
     });
 
-    const actor: Actor = input.actor ?? { userId: "system", role: "system" };
+    const sanitizedActor: Actor = {
+      userId: actor.userId.trim(),
+      role: actor.role.trim(),
+    };
     const delta = computeDataDelta({}, initialData);
 
     this.#auditSequence += 1;
@@ -124,7 +172,7 @@ export class WorkflowOrchestrator {
       timestamp: nowIso,
       fromState: null,
       toState: this.#config.initialState,
-      triggeredBy: actor,
+      triggeredBy: sanitizedActor,
       notes: input.notes ?? "Claim created and submitted",
       outcome: "SUCCESS",
       workflowVersion: this.#config.version,
@@ -220,10 +268,25 @@ export class WorkflowOrchestrator {
    * Executes an atomic, validated state transition on a claim.
    */
   public transition(request: TransitionRequest): TransitionResult {
-    const idempotencyCacheKey =
-      request.idempotencyKey !== undefined
-        ? `${request.claimId}::${request.idempotencyKey}`
+    if (!isPlainObject(request) || typeof request.claimId !== "string" || request.claimId.trim().length === 0) {
+      return cloneAndFreeze({
+        ok: false,
+        idempotentReplay: false,
+        error: createWorkflowError({
+          code: "INVALID_CLAIM_DATA",
+          message: "'claimId' must be a non-empty string",
+          claimId: String(request?.claimId ?? ""),
+          toState: String(request?.toState ?? ""),
+        }),
+      });
+    }
+
+    const validIdempotencyKey =
+      request.idempotencyKey !== undefined && validateIdempotencyKeyInput(request.idempotencyKey) === null
+        ? request.idempotencyKey.trim()
         : undefined;
+    const idempotencyCacheKey =
+      validIdempotencyKey !== undefined ? `${request.claimId}::${validIdempotencyKey}` : undefined;
 
     if (idempotencyCacheKey !== undefined) {
       const cached = this.#idempotencyCache.get(idempotencyCacheKey);
@@ -241,10 +304,13 @@ export class WorkflowOrchestrator {
           code: "CLAIM_NOT_FOUND",
           message: `Claim '${request.claimId}' does not exist`,
           claimId: request.claimId,
-          toState: request.toState,
+          toState: String(request.toState ?? ""),
         }),
       });
     }
+
+    const inputFailure = this.#validateTransitionRequest(claim, request, idempotencyCacheKey);
+    if (inputFailure) return inputFailure;
 
     const concurrencyFailure = this.#checkConcurrency(claim, request, idempotencyCacheKey);
     if (concurrencyFailure) return concurrencyFailure;
@@ -276,6 +342,44 @@ export class WorkflowOrchestrator {
     if (preconditionFailure) return preconditionFailure;
 
     return this.#commitTransition(claim, request, transitionDef, evalContext, idempotencyCacheKey);
+  }
+
+  #validateTransitionRequest(
+    claim: Claim,
+    request: TransitionRequest,
+    idempotencyCacheKey?: string
+  ): TransitionFailure | null {
+    const issues: string[] = [];
+
+    if (typeof request.toState !== "string" || request.toState.trim().length === 0) {
+      issues.push("'toState' must be a non-empty state name string");
+    }
+
+    issues.push(...validateActorInput(request.actor));
+
+    const notesErr = validateNotesInput(request.notes);
+    if (notesErr) issues.push(notesErr);
+
+    const versionErr = validateExpectedVersionInput(request.expectedVersion);
+    if (versionErr) issues.push(versionErr);
+
+    const idemErr = validateIdempotencyKeyInput(request.idempotencyKey);
+    if (idemErr) issues.push(idemErr);
+
+    if (request.input !== undefined) {
+      issues.push(...validateClaimDataPayload(request.input, "input"));
+    }
+
+    if (issues.length > 0) {
+      return this.#recordFailure({
+        claim,
+        request,
+        code: "INVALID_CLAIM_DATA",
+        message: `Invalid transition input on claim '${claim.id}': ${issues.join("; ")}`,
+        idempotencyCacheKey,
+      });
+    }
+    return null;
   }
 
   #checkConcurrency(
@@ -533,15 +637,30 @@ export class WorkflowOrchestrator {
     readonly idempotencyCacheKey?: string | undefined;
   }): TransitionFailure {
     const nowIso = this.#clock.now().toISOString();
+    const safeActor: Actor = {
+      userId:
+        typeof params.request.actor?.userId === "string" && params.request.actor.userId.trim().length > 0
+          ? params.request.actor.userId.trim()
+          : "unknown",
+      role:
+        typeof params.request.actor?.role === "string" && params.request.actor.role.trim().length > 0
+          ? params.request.actor.role.trim()
+          : "unknown",
+    };
+    const safeToState =
+      typeof params.request.toState === "string" ? params.request.toState : String(params.request.toState ?? "");
+    const safeNotes =
+      typeof params.request.notes === "string" ? params.request.notes : params.message;
+
     this.#auditSequence += 1;
     const auditEntry = this.#auditStore.append({
       id: `AUD-${String(this.#auditSequence).padStart(4, "0")}`,
       claimId: params.claim.id,
       timestamp: nowIso,
       fromState: params.claim.state,
-      toState: params.request.toState,
-      triggeredBy: params.request.actor,
-      notes: params.request.notes ?? params.message,
+      toState: safeToState,
+      triggeredBy: safeActor,
+      notes: safeNotes,
       outcome: "DENIED",
       errorCode: params.code,
       workflowVersion: this.#config.version,
@@ -555,7 +674,7 @@ export class WorkflowOrchestrator {
       message: params.message,
       claimId: params.claim.id,
       fromState: params.claim.state,
-      toState: params.request.toState,
+      toState: safeToState,
       ...(params.failedPreconditions !== undefined
         ? { failedPreconditions: params.failedPreconditions }
         : {}),
