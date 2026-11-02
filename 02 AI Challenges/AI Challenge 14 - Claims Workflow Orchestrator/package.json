@@ -13,7 +13,8 @@
     "scenarios": "tsx scripts/scenarios/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "export:conversation": "node scripts/export-conversation.js"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
