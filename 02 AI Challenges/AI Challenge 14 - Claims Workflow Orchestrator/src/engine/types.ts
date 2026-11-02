@@ -118,6 +118,11 @@ export interface AppendAuditInput {
   readonly sideEffects?: readonly ExecutedSideEffect[];
 }
 
+export interface StoreSnapshot {
+  readonly length: number;
+  readonly sequence: number;
+}
+
 export interface ReplayedClaimTrajectory {
   readonly claimId: string;
   readonly currentState: string | null;

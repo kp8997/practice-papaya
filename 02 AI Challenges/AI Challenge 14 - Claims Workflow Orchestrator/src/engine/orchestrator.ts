@@ -18,6 +18,7 @@ import {
   type Claim,
   type Clock,
   type CreateClaimInput,
+  type ExecutedSideEffect,
   type OutboxEvent,
   type TransitionFailure,
   type TransitionRequest,
@@ -28,7 +29,11 @@ import { AuditStore, computeDataDelta, replayClaimHistory } from "./audit-store.
 import { evaluateCyclePolicy } from "./cycle-detector.js";
 import { OutboxStore } from "./outbox-store.js";
 import { evaluatePreconditions } from "./rule-evaluator.js";
-import { applySideEffectMutations, enqueueAndDispatchSideEffects } from "./side-effects.js";
+import {
+  applySideEffectMutations,
+  dispatchSideEffects,
+  enqueueSideEffects,
+} from "./side-effects.js";
 import type {
   ReplayedClaimTrajectory,
   RuleEvaluationContext,
@@ -139,50 +144,64 @@ export class WorkflowOrchestrator {
       throw new ClaimValidationError(`Claim '${input.id}' already exists`, "DUPLICATE_CLAIM");
     }
 
+    const prevClaimSeq = this.#claimSequence;
+    const prevAuditSeq = this.#auditSequence;
+    const auditSnapshot = this.#auditStore.snapshot();
+
     let id = input.id;
-    if (id === undefined) {
-      do {
-        this.#claimSequence += 1;
-        id = `C-${this.#claimSequence}`;
-      } while (this.#claims.has(id));
+    try {
+      if (id === undefined) {
+        do {
+          this.#claimSequence += 1;
+          id = `C-${this.#claimSequence}`;
+        } while (this.#claims.has(id));
+      }
+
+      const nowIso = this.#clock.now().toISOString();
+      const claim: Claim = cloneAndFreeze({
+        id,
+        state: this.#config.initialState,
+        version: 1,
+        workflowVersion: this.#config.version,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        stateEnteredAt: nowIso,
+        data: initialData,
+      });
+
+      const sanitizedActor: Actor = {
+        userId: actor.userId.trim(),
+        role: actor.role.trim(),
+      };
+      const delta = computeDataDelta({}, initialData);
+
+      this.#auditSequence += 1;
+      this.#auditStore.append({
+        id: `AUD-${String(this.#auditSequence).padStart(4, "0")}`,
+        claimId: id,
+        timestamp: nowIso,
+        fromState: null,
+        toState: this.#config.initialState,
+        triggeredBy: sanitizedActor,
+        notes: input.notes ?? "Claim created and submitted",
+        outcome: "SUCCESS",
+        workflowVersion: this.#config.version,
+        claimVersion: 1,
+        delta,
+        sideEffects: [],
+      });
+
+      this.#claims.set(id, claim);
+      return claim;
+    } catch (err) {
+      if (id !== undefined) {
+        this.#claims.delete(id);
+      }
+      this.#claimSequence = prevClaimSeq;
+      this.#auditSequence = prevAuditSeq;
+      this.#auditStore.rollback(auditSnapshot);
+      throw err;
     }
-
-    const nowIso = this.#clock.now().toISOString();
-    const claim: Claim = cloneAndFreeze({
-      id,
-      state: this.#config.initialState,
-      version: 1,
-      workflowVersion: this.#config.version,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      stateEnteredAt: nowIso,
-      data: initialData,
-    });
-
-    const sanitizedActor: Actor = {
-      userId: actor.userId.trim(),
-      role: actor.role.trim(),
-    };
-    const delta = computeDataDelta({}, initialData);
-
-    this.#auditSequence += 1;
-    this.#auditStore.append({
-      id: `AUD-${String(this.#auditSequence).padStart(4, "0")}`,
-      claimId: id,
-      timestamp: nowIso,
-      fromState: null,
-      toState: this.#config.initialState,
-      triggeredBy: sanitizedActor,
-      notes: input.notes ?? "Claim created and submitted",
-      outcome: "SUCCESS",
-      workflowVersion: this.#config.version,
-      claimVersion: 1,
-      delta,
-      sideEffects: [],
-    });
-
-    this.#claims.set(id, claim);
-    return claim;
   }
 
   public getClaim(claimId: string): Claim | undefined {
@@ -558,54 +577,77 @@ export class WorkflowOrchestrator {
     evalContext: RuleEvaluationContext,
     idempotencyCacheKey?: string
   ): TransitionSuccess {
-    const nowIso = evalContext.now.toISOString();
-    const { nextData, plans } = applySideEffectMutations(
-      transitionDef.sideEffects,
-      evalContext,
-      () => {
-        this.#sideEffectSequence += 1;
-        return this.#sideEffectSequence;
-      }
-    );
+    const prevSideEffectSeq = this.#sideEffectSequence;
+    const prevAuditSeq = this.#auditSequence;
+    const auditSnapshot = this.#auditStore.snapshot();
+    const outboxSnapshot = this.#outboxStore.snapshot();
 
-    const delta = computeDataDelta(claim.data, nextData);
-    const nextVersion = claim.version + 1;
-    const updatedClaim: Claim = cloneAndFreeze({
-      ...claim,
-      state: request.toState,
-      version: nextVersion,
-      updatedAt: nowIso,
-      stateEnteredAt: nowIso,
-      data: nextData,
-    });
+    let updatedClaim: Claim;
+    let auditEntry: AuditEntry;
+    let executedSideEffects: readonly ExecutedSideEffect[];
 
-    this.#auditSequence += 1;
-    const auditEntryId = `AUD-${String(this.#auditSequence).padStart(4, "0")}`;
+    // Phase 2: Atomic Unit-of-Work Commit (Domain State + Audit + PENDING Outbox)
+    try {
+      const nowIso = evalContext.now.toISOString();
+      const { nextData, plans } = applySideEffectMutations(
+        transitionDef.sideEffects,
+        evalContext,
+        () => {
+          this.#sideEffectSequence += 1;
+          return this.#sideEffectSequence;
+        }
+      );
 
-    const { executedSideEffects, outboxEvents } = enqueueAndDispatchSideEffects(
-      claim.id,
-      auditEntryId,
-      nowIso,
-      plans,
-      this.#outboxStore
-    );
+      const delta = computeDataDelta(claim.data, nextData);
+      const nextVersion = claim.version + 1;
+      updatedClaim = cloneAndFreeze({
+        ...claim,
+        state: request.toState,
+        version: nextVersion,
+        updatedAt: nowIso,
+        stateEnteredAt: nowIso,
+        data: nextData,
+      });
 
-    const auditEntry = this.#auditStore.append({
-      id: auditEntryId,
-      claimId: claim.id,
-      timestamp: nowIso,
-      fromState: claim.state,
-      toState: request.toState,
-      triggeredBy: request.actor,
-      notes: request.notes ?? `Transitioned ${claim.state} -> ${request.toState}`,
-      outcome: "SUCCESS",
-      workflowVersion: this.#config.version,
-      claimVersion: nextVersion,
-      delta,
-      sideEffects: executedSideEffects,
-    });
+      this.#auditSequence += 1;
+      const auditEntryId = `AUD-${String(this.#auditSequence).padStart(4, "0")}`;
 
-    this.#claims.set(claim.id, updatedClaim);
+      executedSideEffects = enqueueSideEffects(
+        claim.id,
+        auditEntryId,
+        nowIso,
+        plans,
+        this.#outboxStore
+      );
+
+      auditEntry = this.#auditStore.append({
+        id: auditEntryId,
+        claimId: claim.id,
+        timestamp: nowIso,
+        fromState: claim.state,
+        toState: request.toState,
+        triggeredBy: request.actor,
+        notes: request.notes ?? `Transitioned ${claim.state} -> ${request.toState}`,
+        outcome: "SUCCESS",
+        workflowVersion: this.#config.version,
+        claimVersion: nextVersion,
+        delta,
+        sideEffects: executedSideEffects,
+      });
+
+      this.#claims.set(claim.id, updatedClaim);
+    } catch (err) {
+      // Atomic Rollback: restore claim, audit store, outbox store, and sequence counters
+      this.#claims.set(claim.id, claim);
+      this.#sideEffectSequence = prevSideEffectSeq;
+      this.#auditSequence = prevAuditSeq;
+      this.#auditStore.rollback(auditSnapshot);
+      this.#outboxStore.rollback(outboxSnapshot);
+      throw err;
+    }
+
+    // Phase 3: Post-Commit Outbox Dispatch (Read-Your-Own-Writes guaranteed)
+    const outboxEvents = dispatchSideEffects(claim.id, this.#outboxStore);
 
     const successResult: TransitionSuccess = cloneAndFreeze({
       ok: true,

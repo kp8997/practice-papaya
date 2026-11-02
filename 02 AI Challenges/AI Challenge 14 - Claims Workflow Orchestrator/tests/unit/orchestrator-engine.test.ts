@@ -198,5 +198,131 @@ describe("Phase 3 — CycleDetector, SideEffects & WorkflowOrchestrator Unit Sui
     ]);
     expect(orchestrator.getClaim("C-HYGIENE")?.data.assessmentStartedAt).toBeUndefined();
   });
+
+  it("guarantees Read-Your-Own-Writes during post-commit outbox dispatch (claim and audit trail are already committed when dispatcher runs)", () => {
+    const config = loadWorkflowConfig(MAIN_CONFIG_PATH);
+    const observedDuringDispatch: {
+      claimState: string | undefined;
+      claimVersion: number | undefined;
+      auditCount: number;
+      latestAuditToState: string | undefined;
+      outboxStatusAtCallTime: string | undefined;
+    }[] = [];
+
+    let orchestratorRef!: WorkflowOrchestrator;
+    orchestratorRef = new WorkflowOrchestrator(config, {
+      outboxDispatcher: (event) => {
+        const liveClaim = orchestratorRef.getClaim(event.claimId);
+        const liveAudit = orchestratorRef.getAuditTrail(event.claimId);
+        observedDuringDispatch.push({
+          claimState: liveClaim?.state,
+          claimVersion: liveClaim?.version,
+          auditCount: liveAudit.length,
+          latestAuditToState: liveAudit[liveAudit.length - 1]?.toState,
+          outboxStatusAtCallTime: event.status,
+        });
+      },
+    });
+
+    orchestratorRef.createClaim({
+      id: "C-RYOW",
+      data: {
+        amount: 4500,
+        policyLimit: 10000,
+        submittedDocuments: ["claim_form", "medical_report", "itemized_receipt"],
+      },
+    });
+
+    const result = orchestratorRef.transition({
+      claimId: "C-RYOW",
+      toState: "DOCUMENTS_VERIFIED",
+      actor: { userId: "u-clerk-1", role: "document_clerk" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(observedDuringDispatch).toHaveLength(1);
+    // When the outbox dispatcher runs, the claim & audit must ALREADY reflect the committed transition
+    expect(observedDuringDispatch[0]).toEqual({
+      claimState: "DOCUMENTS_VERIFIED",
+      claimVersion: 2,
+      auditCount: 2,
+      latestAuditToState: "DOCUMENTS_VERIFIED",
+      outboxStatusAtCallTime: "PENDING",
+    });
+  });
+
+  it("atomically rolls back claim state, audit store, outbox store, and sequence counters if an error occurs mid-commit", () => {
+    const config = loadWorkflowConfig(MAIN_CONFIG_PATH);
+
+    class FaultyAuditStore extends AuditStore {
+      public failNextAppend = false;
+
+      public override append(input: Parameters<AuditStore["append"]>[0]) {
+        if (this.failNextAppend) {
+          throw new Error("Simulated storage failure after outbox enqueue");
+        }
+        return super.append(input);
+      }
+    }
+
+    const faultyAuditStore = new FaultyAuditStore();
+    const dispatchedEvents: string[] = [];
+    const orchestrator = new WorkflowOrchestrator(config, {
+      auditStore: faultyAuditStore,
+      outboxDispatcher: (ev) => {
+        dispatchedEvents.push(ev.id);
+      },
+    });
+
+    orchestrator.createClaim({
+      id: "C-ROLLBACK",
+      data: {
+        amount: 3000,
+        policyLimit: 10000,
+        submittedDocuments: ["claim_form", "medical_report", "itemized_receipt"],
+      },
+    });
+
+    // Inject fault right before transition commit
+    faultyAuditStore.failNextAppend = true;
+
+    expect(() =>
+      orchestrator.transition({
+        claimId: "C-ROLLBACK",
+        toState: "DOCUMENTS_VERIFIED",
+        actor: { userId: "u-clerk-1", role: "document_clerk" },
+      })
+    ).toThrow("Simulated storage failure after outbox enqueue");
+
+    // Verify 100% atomic rollback:
+    // 1. Claim remains in SUBMITTED v1
+    const claimAfterFail = orchestrator.getClaim("C-ROLLBACK");
+    expect(claimAfterFail?.state).toBe("SUBMITTED");
+    expect(claimAfterFail?.version).toBe(1);
+
+    // 2. Outbox store was rolled back (0 orphaned PENDING events, 0 dispatched events)
+    expect(orchestrator.getOutboxEvents("C-ROLLBACK")).toHaveLength(0);
+    expect(dispatchedEvents).toHaveLength(0);
+
+    // 3. Audit trail still has only the initial creation entry (AUD-0001)
+    const auditAfterFail = orchestrator.getAuditTrail("C-ROLLBACK");
+    expect(auditAfterFail).toHaveLength(1);
+    expect(auditAfterFail[0]?.id).toBe("AUD-0001");
+
+    // 4. Subsequent transition after recovery succeeds with contiguous IDs (AUD-0002, OBX-0001)
+    faultyAuditStore.failNextAppend = false;
+    const retryResult = orchestrator.transition({
+      claimId: "C-ROLLBACK",
+      toState: "DOCUMENTS_VERIFIED",
+      actor: { userId: "u-clerk-1", role: "document_clerk" },
+    });
+    expect(retryResult.ok).toBe(true);
+    if (retryResult.ok) {
+      expect(retryResult.claim.state).toBe("DOCUMENTS_VERIFIED");
+      expect(retryResult.claim.version).toBe(2);
+      expect(retryResult.auditEntry.id).toBe("AUD-0002");
+      expect(retryResult.outboxEvents[0]?.id).toBe("OBX-0001");
+    }
+  });
 });
 

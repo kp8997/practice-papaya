@@ -6,6 +6,7 @@ import type {
   EnqueueOutboxInput,
   OutboxDispatcher,
   OutboxStoreOptions,
+  StoreSnapshot,
 } from "./types.js";
 
 /**
@@ -97,6 +98,20 @@ export class OutboxStore {
 
   public getAll(): readonly OutboxEvent[] {
     return deepFreeze([...this.#events]);
+  }
+
+  public snapshot(): StoreSnapshot {
+    return {
+      length: this.#events.length,
+      sequence: this.#sequence,
+    };
+  }
+
+  public rollback(snap: StoreSnapshot): void {
+    if (snap.length >= 0 && snap.length <= this.#events.length) {
+      this.#events.length = snap.length;
+      this.#sequence = snap.sequence;
+    }
   }
 }
 

@@ -6,7 +6,11 @@ import type {
   AuditEntry,
   AuditFieldChange,
 } from "../domain/types.js";
-import type { AppendAuditInput, ReplayedClaimTrajectory } from "./types.js";
+import type {
+  AppendAuditInput,
+  ReplayedClaimTrajectory,
+  StoreSnapshot,
+} from "./types.js";
 
 /**
  * Computes field-by-field `{ before, after }` deltas between two claim data snapshots.
@@ -85,6 +89,20 @@ export class AuditStore {
 
   public getAll(): readonly AuditEntry[] {
     return deepFreeze([...this.#entries]);
+  }
+
+  public snapshot(): StoreSnapshot {
+    return {
+      length: this.#entries.length,
+      sequence: this.#sequence,
+    };
+  }
+
+  public rollback(snap: StoreSnapshot): void {
+    if (snap.length >= 0 && snap.length <= this.#entries.length) {
+      this.#entries.length = snap.length;
+      this.#sequence = snap.sequence;
+    }
   }
 }
 

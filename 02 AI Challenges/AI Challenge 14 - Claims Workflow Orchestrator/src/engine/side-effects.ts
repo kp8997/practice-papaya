@@ -119,20 +119,17 @@ export function applySideEffectMutations(
 }
 
 /**
- * Step 2 of side-effect processing:
- * Enqueues every prepared side effect into the Transactional Outbox and dispatches
- * pending events after the state transition has been committed.
+ * Step 2a of side-effect processing (Transactional Enqueue Phase):
+ * Enqueues every prepared side effect into the Transactional Outbox with status `PENDING`
+ * alongside the domain state & audit commit, before external handlers are invoked.
  */
-export function enqueueAndDispatchSideEffects(
+export function enqueueSideEffects(
   claimId: string,
   auditEntryId: string,
   timestamp: string,
   plans: readonly PreparedSideEffectPlan[],
   outboxStore: OutboxStore
-): {
-  readonly executedSideEffects: readonly ExecutedSideEffect[];
-  readonly outboxEvents: readonly OutboxEvent[];
-} {
+): readonly ExecutedSideEffect[] {
   const enqueuedIds: string[] = [];
 
   for (const plan of plans) {
@@ -148,7 +145,6 @@ export function enqueueAndDispatchSideEffects(
     enqueuedIds.push(event.id);
   }
 
-  const dispatchedEvents = outboxStore.dispatchPending(claimId);
   const executedSideEffects: ExecutedSideEffect[] = plans.map((plan, idx) => {
     const target = plan.config.type === "notify" ? plan.config.target : undefined;
     const outboxEventId = enqueuedIds[idx];
@@ -161,8 +157,47 @@ export function enqueueAndDispatchSideEffects(
     };
   });
 
+  return cloneAndFreeze(executedSideEffects);
+}
+
+/**
+ * Step 2b of side-effect processing (Post-Commit Dispatch Phase):
+ * Dispatches pending outbox events for the given claim AFTER the domain state
+ * and audit trail have been atomically committed.
+ */
+export function dispatchSideEffects(
+  claimId: string,
+  outboxStore: OutboxStore
+): readonly OutboxEvent[] {
+  return outboxStore.dispatchPending(claimId);
+}
+
+/**
+ * Step 2 of side-effect processing (combined convenience helper):
+ * Enqueues every prepared side effect into the Transactional Outbox and dispatches
+ * pending events after the state transition has been committed.
+ */
+export function enqueueAndDispatchSideEffects(
+  claimId: string,
+  auditEntryId: string,
+  timestamp: string,
+  plans: readonly PreparedSideEffectPlan[],
+  outboxStore: OutboxStore
+): {
+  readonly executedSideEffects: readonly ExecutedSideEffect[];
+  readonly outboxEvents: readonly OutboxEvent[];
+} {
+  const executedSideEffects = enqueueSideEffects(
+    claimId,
+    auditEntryId,
+    timestamp,
+    plans,
+    outboxStore
+  );
+  const outboxEvents = dispatchSideEffects(claimId, outboxStore);
+
   return {
-    executedSideEffects: cloneAndFreeze(executedSideEffects),
-    outboxEvents: dispatchedEvents,
+    executedSideEffects,
+    outboxEvents,
   };
 }
