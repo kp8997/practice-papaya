@@ -324,5 +324,140 @@ describe("Phase 3 — CycleDetector, SideEffects & WorkflowOrchestrator Unit Sui
       expect(retryResult.outboxEvents[0]?.id).toBe("OBX-0001");
     }
   });
+
+  it("atomically rolls back createClaim if audit logging fails during creation", () => {
+    const config = loadWorkflowConfig(MAIN_CONFIG_PATH);
+
+    class FaultyAuditStore extends AuditStore {
+      public failNextAppend = false;
+
+      public override append(input: Parameters<AuditStore["append"]>[0]) {
+        if (this.failNextAppend) {
+          throw new Error("Simulated audit disk failure during createClaim");
+        }
+        return super.append(input);
+      }
+    }
+
+    const faultyStore = new FaultyAuditStore();
+    const orchestrator = new WorkflowOrchestrator(config, {
+      auditStore: faultyStore,
+    });
+
+    faultyStore.failNextAppend = true;
+    expect(() =>
+      orchestrator.createClaim({
+        id: "C-FAIL-CREATE",
+        data: { amount: 1000 },
+      })
+    ).toThrow("Simulated audit disk failure during createClaim");
+
+    // The claim must NOT exist in the orchestrator
+    expect(orchestrator.getClaim("C-FAIL-CREATE")).toBeUndefined();
+    expect(orchestrator.getAllClaims()).toHaveLength(0);
+    expect(orchestrator.getAuditTrail("C-FAIL-CREATE")).toHaveLength(0);
+
+    // After resolving failure, can create claim cleanly with no corruption
+    faultyStore.failNextAppend = false;
+    const successfulClaim = orchestrator.createClaim({
+      id: "C-FAIL-CREATE",
+      data: { amount: 1000 },
+    });
+    expect(successfulClaim.id).toBe("C-FAIL-CREATE");
+    expect(orchestrator.getClaim("C-FAIL-CREATE")).toBeDefined();
+    expect(orchestrator.getAuditTrail("C-FAIL-CREATE")).toHaveLength(1);
+    expect(orchestrator.getAuditTrail("C-FAIL-CREATE")[0]?.id).toBe("AUD-0001");
+  });
+
+  it("isolates Phase 1 precondition failure: zero side effects prepared or enqueued, zero state mutation", () => {
+    const config = loadWorkflowConfig(MAIN_CONFIG_PATH);
+    const orchestrator = new WorkflowOrchestrator(config);
+
+    orchestrator.createClaim({
+      id: "C-GUARD",
+      data: {
+        amount: 2500,
+        policyLimit: 10000,
+        submittedDocuments: ["claim_form"], // Missing medical_report & itemized_receipt
+      },
+    });
+
+    const failureResult = orchestrator.transition({
+      claimId: "C-GUARD",
+      toState: "DOCUMENTS_VERIFIED",
+      actor: { userId: "u-clerk", role: "document_clerk" },
+    });
+
+    expect(failureResult.ok).toBe(false);
+    if (!failureResult.ok) {
+      expect(failureResult.error.code).toBe("PRECONDITION_FAILED");
+    }
+
+    // Zero outbox events enqueued or dispatched
+    expect(orchestrator.getOutboxEvents("C-GUARD")).toHaveLength(0);
+
+    // Claim state and version unchanged
+    const claim = orchestrator.getClaim("C-GUARD");
+    expect(claim?.state).toBe("SUBMITTED");
+    expect(claim?.version).toBe(1);
+
+    // Audit trail logs exactly one DENIED attempt without mutating delta or side effects
+    const audit = orchestrator.getAuditTrail("C-GUARD");
+    expect(audit).toHaveLength(2); // AUD-0001 (create SUCCESS), AUD-0002 (transition DENIED)
+    expect(audit[1]?.outcome).toBe("DENIED");
+    expect(audit[1]?.errorCode).toBe("PRECONDITION_FAILED");
+    expect(audit[1]?.sideEffects).toEqual([]);
+    expect(audit[1]?.delta).toEqual({});
+  });
+
+  it("isolates Phase 3 outbox handler failures: domain transition remains committed, outbox marked FAILED", () => {
+    const config = loadWorkflowConfig(MAIN_CONFIG_PATH);
+    const orchestrator = new WorkflowOrchestrator(config, {
+      outboxDispatcher: (event) => {
+        if (event.type === "notify") {
+          throw new Error("Downstream notification service unavailable (HTTP 503)");
+        }
+      },
+    });
+
+    orchestrator.createClaim({
+      id: "C-OUTBOX-FAIL",
+      data: {
+        amount: 3000,
+        policyLimit: 10000,
+        submittedDocuments: ["claim_form", "medical_report", "itemized_receipt"],
+      },
+    });
+
+    const result = orchestrator.transition({
+      claimId: "C-OUTBOX-FAIL",
+      toState: "DOCUMENTS_VERIFIED",
+      actor: { userId: "u-clerk", role: "document_clerk" },
+    });
+
+    // Domain transition MUST succeed despite downstream outbox dispatcher failure
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.claim.state).toBe("DOCUMENTS_VERIFIED");
+      expect(result.claim.version).toBe(2);
+      expect(result.auditEntry.outcome).toBe("SUCCESS");
+
+      // Outbox event is marked FAILED with error message captured
+      expect(result.outboxEvents).toHaveLength(1);
+      expect(result.outboxEvents[0]?.status).toBe("FAILED");
+      expect(result.outboxEvents[0]?.errorMessage).toBe(
+        "Downstream notification service unavailable (HTTP 503)"
+      );
+    }
+
+    // Claim is persisted in new state
+    const persisted = orchestrator.getClaim("C-OUTBOX-FAIL");
+    expect(persisted?.state).toBe("DOCUMENTS_VERIFIED");
+    expect(persisted?.version).toBe(2);
+
+    // Querying failed outbox events returns the failed event
+    const failedEvents = orchestrator.getFailedOutboxEvents();
+    expect(failedEvents.some((e) => e.claimId === "C-OUTBOX-FAIL")).toBe(true);
+  });
 });
 
